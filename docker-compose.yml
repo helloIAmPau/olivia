@@ -1,0 +1,19 @@
+services:
+  harness:
+    image: 'olivia/harness:0.0.0'
+    restart: 'always'
+    build:
+      context: './harness'
+    networks:
+      - 'backend'
+  litellm:
+    image: 'ghcr.io/berriai/litellm:v1.93.0'
+    restart: 'always'
+    environment:
+      - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
+    networks:
+      - 'backend'
+
+networks:
+  backend:
+  frontend:

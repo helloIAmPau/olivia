@@ -1,0 +1,34 @@
+services:
+  harness:
+    environment:
+      - 'RUST_LOG=debug'
+    configs:
+      - source: 'test'
+        target: '/config.yml'
+    build:
+      target: 'builder'
+    volumes:
+      - './harness:/source'
+
+configs:
+  test:
+    content: |
+      services:
+        test_http:
+          type: 'http'
+          triggers:
+            incoming_request:
+              path: '/testolo'
+              prompt: 'You received the following message from the user. Please do something'
+        second_http:
+          type: 'http'
+          port: 9000
+          triggers:
+            put_incoming_request:
+              method: 'put'
+              path: '/puttolo'
+              prompt: 'You received the following message from the user. Please do something'
+            post_incoming_request:
+              method: 'post'
+              path: '/postolo'
+              prompt: 'You received the following message from the user. Please do something'
