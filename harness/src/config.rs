@@ -7,6 +7,7 @@ use tracing::debug;
 use tracing::error;
 
 use crate::services::ServiceConfig;
+use crate::agent::AgentConfig;
 
 pub struct ConfigError {
 }
@@ -19,7 +20,8 @@ impl ConfigError {
 
 #[derive(Deserialize)]
 pub struct Config {
-  pub services: HashMap<String, ServiceConfig>
+  pub services: HashMap<String, ServiceConfig>,
+  pub agent: AgentConfig
 }
 
 impl Config {

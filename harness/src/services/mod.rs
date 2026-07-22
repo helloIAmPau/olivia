@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use tracing::error;
 use serde::Deserialize;
-use tokio::spawn;
+use tokio::task::JoinSet;
 
 use http::HttpConfig;
 use http::init_http;
@@ -26,30 +26,29 @@ impl ServiceError {
 
 
 pub async fn init(config: HashMap<String, ServiceConfig>) -> Result<(), ServiceError> {
-  let mut handles = Vec::new();
+  let mut handles = JoinSet::new();
 
   for (name, service_config) in config {
     match service_config {
       ServiceConfig::Http(http_config) => {
-        let handle = spawn(async {
+        handles.spawn(async move {
           init_http(name, http_config).await
         });
-        handles.push(handle);
       }
     }
   }
 
-  for handle in handles {
-    let result = match handle.await {
+  while let Some(joined) = handles.join_next().await {
+    let result = match joined {
       Err(error) => {
         error!("{}", error);
-    
+
         return Err(ServiceError::new());
       },
       Ok(result) => result
     };
 
-    match result {
+     match result {
       Err(error) => {
         return Err(error);
       },

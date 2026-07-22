@@ -12,6 +12,6 @@ cmd cd /source && cargo watch -x run
 
 from debian:stable-slim 
 
-copy --from=builder /source/target/release /app
+copy --from=builder /source/target/release/harness /harness
 
-cmd cd /app && ./harness
+cmd /harness

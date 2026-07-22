@@ -13,6 +13,8 @@ services:
 configs:
   test:
     content: |
+      agent:
+        prompt: 'You are my best friend and you must handle my entire life'
       services:
         test_http:
           type: 'http'

@@ -1,11 +1,13 @@
 pub mod config;
 pub mod services;
 pub mod trigger;
+pub mod agent;
 
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
+use agent::Agent;
 use services::init;
 
 #[tokio::main]
@@ -24,6 +26,8 @@ async fn main() {
       panic!();
     }
   };
+
+  let agent = Agent::new(config.agent);
 
   match init(config.services).await {
     Err(_) => {
