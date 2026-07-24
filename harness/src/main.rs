@@ -18,7 +18,7 @@ async fn main() {
   };
   tracing_subscriber::fmt().with_env_filter(filter).init();
 
-  info!("Welcome to Oliva Harness");
+  info!("Welcome to Olivia Harness");
 
   let config = match Config::load().await {
     Ok(config) => config,
