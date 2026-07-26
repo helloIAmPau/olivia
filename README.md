@@ -1,4 +1,4 @@
-# Oliva Harness
+# Olivia Harness
 
 A config-driven harness that exposes an LLM agent through pluggable triggers. You
 describe your agent and the services that should invoke it in a single YAML file,
@@ -27,8 +27,12 @@ address/port and registers a route per trigger.
                 │                                         │ │
                 └─────────────────────────────────────────┘
                                                           ▼
-                                                   LiteLLM ──► LLM
+                                                   LiteLLM ──► Ollama
 ```
+
+By default the bundled stack points LiteLLM at [Ollama](https://ollama.com/) so
+models run locally; swap the `model_list` in the LiteLLM config to point at a
+hosted provider instead if you'd rather not run models locally.
 
 ## Configuration
 
@@ -96,7 +100,9 @@ services:
 
 ### With Docker Compose (recommended)
 
-The stack runs the harness alongside a LiteLLM proxy.
+The stack runs the harness alongside a LiteLLM proxy and a local Ollama instance.
+Startup order is enforced via healthchecks: `ollama` must report healthy before
+`litellm` starts, and `litellm` must report healthy before the `harness` starts.
 
 1. Provide the required environment variables (see [Environment](#environment)).
 2. Start it:
@@ -106,6 +112,13 @@ The stack runs the harness alongside a LiteLLM proxy.
    ```
 
    This runs `docker compose up -d --build`.
+
+3. Pull the model(s) referenced in the LiteLLM config into Ollama (only needed
+   once — it's persisted under `data/ollama`):
+
+   ```sh
+   docker compose exec ollama ollama pull gemma4:12b
+   ```
 
 ### Development
 
@@ -125,7 +138,7 @@ This sources `./.env.develop` and runs both compose files
 | Variable             | Used by          | Description                                   |
 | -------------------- | ---------------- | --------------------------------------------- |
 | `LITELLM_MASTER_KEY` | harness, litellm | Master key for the LiteLLM proxy.             |
-| `OPENAI_API_KEY`     | litellm          | Upstream provider key used by LiteLLM.        |
+| `LITELLM_HOST`       | harness          | Base URL of the LiteLLM proxy. Defaults to `http://litellm:4000`. |
 | `RUST_LOG`           | harness          | Log filter (e.g. `info`, `debug`). Defaults to `info`. |
 
 > **Note:** do not commit real secrets. Keep them in a local, git-ignored env file
@@ -135,9 +148,10 @@ This sources `./.env.develop` and runs both compose files
 
 ```
 .
-├── docker-compose.yml           # Base stack: harness + litellm
+├── docker-compose.yml           # Base stack: harness + litellm + ollama
 ├── docker-compose.develop.yml   # Dev overrides + inline test config
 ├── Makefile                     # `make up`, `make develop`
+├── data/ollama/                 # Ollama's persisted models/cache (volume mount)
 └── harness/                     # Rust service
     ├── Cargo.toml
     ├── Dockerfile
@@ -146,7 +160,7 @@ This sources `./.env.develop` and runs both compose files
         ├── config.rs            # Top-level config model + loader
         ├── agent/               # Agent + LLM client
         │   ├── mod.rs
-        │   └── client.rs
+        │   └── llm_client.rs    # reqwest client for the LiteLLM proxy
         ├── services/            # Service runtime
         │   ├── mod.rs           # Service dispatch (spawns each service)
         │   └── http.rs          # HTTP service + trigger routing
@@ -157,6 +171,8 @@ This sources `./.env.develop` and runs both compose files
 
 - **Rust** (edition 2024), async via [Tokio](https://tokio.rs/)
 - [axum](https://github.com/tokio-rs/axum) for HTTP
+- [reqwest](https://github.com/seanmonstar/reqwest) as the LiteLLM HTTP client
 - [serde](https://serde.rs/) + `serde_yaml` for configuration
 - [tracing](https://github.com/tokio-rs/tracing) for structured logs
 - [LiteLLM](https://github.com/BerriAI/litellm) as the LLM gateway
+- [Ollama](https://ollama.com/) as the default local model runtime

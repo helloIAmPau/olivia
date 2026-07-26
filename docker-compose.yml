@@ -8,15 +8,58 @@ services:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
     networks:
       - 'backend'
+    depends_on:
+      litellm:
+        condition: 'service_healthy'
   litellm:
     image: 'ghcr.io/berriai/litellm:v1.93.0'
     restart: 'always'
+    configs:
+      - source: 'litellm'
+        target: '/config.yml'
+    command:
+      - '--config=/config.yml'
     environment:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
-      - 'OPENAI_API_KEY=${OPENAI_API_KEY}'
     networks:
       - 'backend'
+      - 'llm'
+    depends_on:
+      ollama:
+        condition: 'service_healthy'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'command -v curl > /dev/null 2>&1 || (apk update && apk add curl); curl -f http://localhost:4000/health/readiness || exit 1'
+      interval: '10s'
+      timeout: '5s'
+      retries: 5
+      start_period: '5s'
+  ollama:
+    image: 'ollama/ollama:0.32.4'
+    restart: 'always'
+    volumes:
+      - './data/ollama:/root/.ollama'
+    networks:
+      - 'llm'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'command -v curl > /dev/null 2>&1 || (apt-get update && apt-get install -y curl); curl -f http://localhost:11434/ || exit 1'
+      interval: '10s'
+      timeout: '5s'
+      retries: 5
+      start_period: '5s'
 
 networks:
   backend:
-  frontend:
+  llm:
+
+configs:
+  litellm:
+    content: |
+      model_list:
+        - model_name: 'ollama/gemma4'
+          litellm_params:
+            model: 'ollama/gemma4:12b'
+            api_base: 'http://ollama:11434'
