@@ -22,16 +22,21 @@ async fn main() {
 
   let config = match Config::load().await {
     Ok(config) => config,
-    Err(_) => {
-      panic!();
+    Err(error) => {
+      panic!("{}", error);
     }
   };
 
-  let agent = Agent::new(config.agent);
+  let agent = match Agent::new(config.agent) {
+    Ok(agent) => agent,
+    Err(error) => {
+      panic!("{}", error);
+    }
+  };
 
   match init(config.services).await {
-    Err(_) => {
-      panic!();
+    Err(error) => {
+      panic!("{}", error);
     },
     _ => {}
   };

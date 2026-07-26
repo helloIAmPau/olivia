@@ -1,20 +1,30 @@
 use std::collections::HashMap;
+use std::io::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FormatterResult;
 
 use tokio::fs::read_to_string;
 use serde::Deserialize;
+use serde_yaml::Error as SerdeError;
 use tracing::info;
 use tracing::debug;
-use tracing::error;
 
 use crate::services::ServiceConfig;
 use crate::agent::AgentConfig;
 
-pub struct ConfigError {
+#[derive(Debug)]
+pub enum ConfigError {
+  Io(Error),
+  Parsing(SerdeError)
 }
 
-impl ConfigError {
-  pub fn new() -> Self {
-    return Self {};
+impl Display for ConfigError {
+  fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
+    return match self {
+      ConfigError::Io(error) => write!(formatter, "IO Error - {}", error),
+      ConfigError::Parsing(error) => write!(formatter, "Yaml Parsing Error - {}", error)
+    };
   }
 }
 
@@ -32,9 +42,7 @@ impl Config {
     let plain_config = match read_to_string(config_path).await {
       Ok(plain_config) => plain_config,
       Err(error) => {
-        error!("{}", error);
-
-        return Err(ConfigError::new());
+        return Err(ConfigError::Io(error));
       }
     };
     debug!("Config content\n{}", plain_config);
@@ -42,9 +50,7 @@ impl Config {
     let config = match serde_yaml::from_str(&plain_config) {
       Ok(config) => config,
       Err(error) => {
-        error!("{}", error);
-
-        return Err(ConfigError::new());
+        return Err(ConfigError::Parsing(error));
       }
     };
 

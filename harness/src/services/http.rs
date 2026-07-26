@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FormatterResult;
 
 use serde::Deserialize;
 use tracing::info;
-use tracing::error;
 use tokio::net::TcpListener;
 use axum::Router;
 use axum::routing::delete;
@@ -18,11 +20,34 @@ use crate::trigger::TriggerConfig;
 use crate::services::ServiceError;
 
 #[derive(Deserialize)]
+pub enum HttpMethod {
+  #[serde(alias = "GET", alias = "get")]
+  Get,
+  #[serde(alias = "POST", alias = "post")]
+  Post,
+  #[serde(alias = "PUT", alias = "put")]
+  Put,
+  #[serde(alias = "DELETE", alias = "delete")]
+  Delete
+}
+
+impl Display for HttpMethod {
+  fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
+    match self {
+      HttpMethod::Get => write!(formatter, "GET"),
+      HttpMethod::Post => write!(formatter, "POST"),
+      HttpMethod::Put => write!(formatter, "PUT"),
+      HttpMethod::Delete => write!(formatter, "DELETE")
+    }
+  }
+}
+
+#[derive(Deserialize)]
 pub struct HttpTriggerConfig {
   #[serde(default = "default_path")]
   pub path: String,
   #[serde(default = "default_method")]
-  pub method: String,
+  pub method: HttpMethod,
 
   #[serde(flatten)]
   pub base: TriggerConfig
@@ -32,8 +57,8 @@ fn default_path() -> String {
   return "/".to_string();
 }
 
-fn default_method() -> String {
-  return "GET".to_string();
+fn default_method() -> HttpMethod {
+  return HttpMethod::Get;
 }
 
 #[derive(Deserialize)]
@@ -61,41 +86,31 @@ pub async fn init_http(name: String, config: HttpConfig) -> Result<(), ServiceEr
   info!("Initializng {} service as http service @ http://{}:{}", name, config.address, config.port);
   let mut app = Router::new();
   for (trigger_name, trigger_config) in config.triggers {
-    let method = trigger_config.method.to_uppercase();
+    info!("Registered new trigger {} as [{}] {}", &trigger_name, &trigger_config.method, &trigger_config.path);
 
-    let handler = match method.as_str() {
-      "GET" => get(http_handler),
-      "POST" => post(http_handler),
-      "PUT" => put(http_handler),
-      "DELETE" => delete(http_handler),
-      _ => {
-        error!("Invalid method selected {}", method);
-
-        return Err(ServiceError::new());
-      }
+    let handler = match trigger_config.method {
+      HttpMethod::Get => get(http_handler),
+      HttpMethod::Post => post(http_handler),
+      HttpMethod::Put => put(http_handler),
+      HttpMethod::Delete => delete(http_handler)
     };
 
     let path = trigger_config.path.clone();
     let state = Arc::new(trigger_config);
     app = app.route(&path, handler.with_state(state));
-    info!("Registered new trigger {} as [{}] {}", trigger_name, method, path);
   }
 
   let address = format!("{}:{}", config.address, config.port);
   let listener = match TcpListener::bind(&address).await {
     Ok(listener) => listener,
     Err(error) => {
-      error!("{}", error);
-
-      return Err(ServiceError::new());
+      return Err(ServiceError::Io(error));
     }
   };
 
   match serve(listener, app).await {
     Err(error) => {
-      error!("{}", error);
-
-      return Err(ServiceError::new());
+      return Err(ServiceError::Io(error));
     },
     _ => {
       return Ok(());

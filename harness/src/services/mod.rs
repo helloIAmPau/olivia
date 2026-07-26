@@ -1,10 +1,14 @@
 pub mod http;
 
 use std::collections::HashMap;
+use std::io::Error;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result as FormatterResult;
 
-use tracing::error;
 use serde::Deserialize;
 use tokio::task::JoinSet;
+use tokio::task::JoinError;
 
 use http::HttpConfig;
 use http::init_http;
@@ -15,15 +19,20 @@ pub enum ServiceConfig {
   Http(HttpConfig)
 }
 
-pub struct ServiceError {
+#[derive(Debug)]
+pub enum ServiceError {
+  Io(Error),
+  Join(JoinError)
 }
 
-impl ServiceError {
-  pub fn new() -> Self {
-    return Self {};
+impl Display for ServiceError {
+  fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
+    return match self {
+      ServiceError::Io(error) => write!(formatter, "IO Error - {}", error),
+      ServiceError::Join(error) => write!(formatter, "Join Error - {}", error)
+    };
   }
 }
-
 
 pub async fn init(config: HashMap<String, ServiceConfig>) -> Result<(), ServiceError> {
   let mut handles = JoinSet::new();
@@ -41,9 +50,7 @@ pub async fn init(config: HashMap<String, ServiceConfig>) -> Result<(), ServiceE
   while let Some(joined) = handles.join_next().await {
     let result = match joined {
       Err(error) => {
-        error!("{}", error);
-
-        return Err(ServiceError::new());
+        return Err(ServiceError::Join(error));
       },
       Ok(result) => result
     };
