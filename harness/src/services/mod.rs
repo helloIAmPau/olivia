@@ -1,6 +1,7 @@
 pub mod http;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::io::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -12,6 +13,8 @@ use tokio::task::JoinError;
 
 use http::HttpConfig;
 use http::init_http;
+
+use crate::agent::Agent;
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
@@ -34,14 +37,17 @@ impl Display for ServiceError {
   }
 }
 
-pub async fn init(config: HashMap<String, ServiceConfig>) -> Result<(), ServiceError> {
+pub async fn init(config: HashMap<String, ServiceConfig>, agent: Agent) -> Result<(), ServiceError> {
   let mut handles = JoinSet::new();
+  let arc_agent = Arc::new(agent);
 
   for (name, service_config) in config {
+    let cloned_agent = arc_agent.clone();
+
     match service_config {
       ServiceConfig::Http(http_config) => {
         handles.spawn(async move {
-          init_http(name, http_config).await
+          init_http(name, http_config, cloned_agent).await
         });
       }
     }

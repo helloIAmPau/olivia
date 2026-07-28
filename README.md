@@ -1,24 +1,40 @@
 # Olivia Harness
 
+> Olivia — triggers with a mind of their own.
+> *(the "ia" is intelligenza artificiale — Italian for artificial intelligence)*
+
 A config-driven harness that exposes an LLM agent through pluggable triggers. You
 describe your agent and the services that should invoke it in a single YAML file,
 and the harness spins up the corresponding endpoints at runtime.
 
-> **Status:** early / work-in-progress. The service scaffolding, config loading, and
-> HTTP routing are in place; wiring incoming triggers through to the agent is still
-> under construction.
+> **Status:** early / work-in-progress. The service scaffolding, config loading,
+> HTTP routing, and trigger-to-agent wiring are in place; more trigger/service
+> types are still to come.
 
 ## How it works
 
 The harness reads a configuration file at startup (`/config.yml`), which defines:
 
-- an **agent** with a system prompt, backed by an LLM (served via
+- an **agent** with a system prompt and a model, backed by an LLM (served via
   [LiteLLM](https://github.com/BerriAI/litellm)), and
 - one or more **services** that expose **triggers** — entry points that hand an
   incoming request to the agent.
 
+At startup the agent checks that its configured `model` is registered on the
+LiteLLM proxy, and refuses to start otherwise.
+
+Internally, the agent (self-identified to the model as "OlivIA") wraps every
+request with a developer prompt instructing the model to reply with a small
+structured JSON envelope — `{ "state": "done" | "error", "result": "..." }` —
+rather than free text. If the model's reply doesn't parse as that shape (or the
+request to LiteLLM fails), the agent retries, up to `MAX_ITERATIONS` (3)
+attempts, before giving up.
+
 The only service type currently implemented is `http`: each HTTP service binds to an
-address/port and registers a route per trigger.
+address/port and registers a route per trigger. When a trigger fires, the harness
+tells the agent which trigger fired and forwards the request body (if any) as
+context, then relays the outcome back to the caller as a JSON envelope (see
+[Reference](#reference) below).
 
 ```
                 ┌─────────────────────────────────────────┐
@@ -40,6 +56,7 @@ The harness loads its configuration from `/config.yml`. Example:
 
 ```yaml
 agent:
+  model: 'ollama/gemma4'
   prompt: 'You are my best friend and you must handle my entire life'
 
 services:
@@ -70,9 +87,10 @@ services:
 
 **`agent`**
 
-| Field    | Type   | Required | Description                          |
-| -------- | ------ | -------- | ------------------------------------ |
-| `prompt` | string | yes      | System prompt given to the agent.    |
+| Field    | Type   | Required | Description                                                    |
+| -------- | ------ | -------- | ---------------------------------------------------------------|
+| `model`  | string | yes      | Model ID to use, as registered in the LiteLLM proxy's `model_list`. |
+| `prompt` | string | yes      | System prompt given to the agent.                              |
 
 **`services.<name>`** — keyed by an arbitrary service name.
 
@@ -95,6 +113,17 @@ services:
 | `path`   | string | no       | `/`     | Route path.                                            |
 | `method` | string | no       | `GET`   | HTTP method: `GET`, `POST`, `PUT`, or `DELETE`.        |
 | `prompt` | string | yes      | —       | Prompt passed to the agent when the trigger fires.     |
+
+**HTTP response** — every trigger responds with a JSON envelope:
+
+```jsonc
+// success
+{ "error": null, "data": { "state": "done", "result": "..." } }
+
+// agent-reported failure, or a request/parsing error after all retries
+{ "error": null, "data": { "state": "error", "result": "..." } }
+{ "error": "<message>", "data": null }
+```
 
 ## Running
 

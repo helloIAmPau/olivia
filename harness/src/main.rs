@@ -27,14 +27,15 @@ async fn main() {
     }
   };
 
-  let agent = match Agent::new(config.agent) {
+  let agent = match Agent::new(config.agent).await {
     Ok(agent) => agent,
     Err(error) => {
       panic!("{}", error);
     }
   };
 
-  match init(config.services).await {
+  let agent = agent;
+  match init(config.services, agent).await {
     Err(error) => {
       panic!("{}", error);
     },

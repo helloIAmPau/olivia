@@ -20,6 +20,7 @@ services:
     command:
       - '--config=/config.yml'
     environment:
+      - "LITELLM_LOG=WARNING"
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
     networks:
       - 'backend'
@@ -38,6 +39,8 @@ services:
   ollama:
     image: 'ollama/ollama:0.32.4'
     restart: 'always'
+    environment:
+      - 'OLLAMA_LOG_LEVEL=warn'
     volumes:
       - './data/ollama:/root/.ollama'
     networks:

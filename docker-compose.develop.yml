@@ -1,5 +1,7 @@
 services:
   harness:
+    ports:
+      - '9000:9000'
     environment:
       - 'RUST_LOG=debug'
     configs:
@@ -14,7 +16,8 @@ configs:
   test:
     content: |
       agent:
-        prompt: 'You are my best friend and you must handle my entire life'
+        model: 'ollama/gemma4'
+        prompt: 'You must help us with some simple tasks'
       services:
         test_http:
           type: 'http'
@@ -29,7 +32,7 @@ configs:
             put_incoming_request:
               method: 'put'
               path: '/puttolo'
-              prompt: 'You received the following message from the user. Please do something'
+              prompt: 'The request you receive contains a number. Concatenate the number with the string PUPUPPAPA'
             post_incoming_request:
               method: 'post'
               path: '/postolo'

@@ -5,6 +5,7 @@ use std::fmt::Formatter;
 use std::fmt::Result as FormatterResult;
 
 use serde::Deserialize;
+use serde::Serialize;
 use tracing::info;
 use tokio::net::TcpListener;
 use axum::Router;
@@ -12,12 +13,16 @@ use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
 use axum::routing::put;
-use axum::extract::Request;
 use axum::extract::State;
 use axum::serve;
+use axum::Json;
 
 use crate::trigger::TriggerConfig;
 use crate::services::ServiceError;
+use crate::agent::Agent;
+use crate::agent::llm_client::ChatMessage;
+use crate::agent::llm_client::ChatMessageRole;
+use crate::agent::AgentPayload;
 
 #[derive(Deserialize)]
 pub enum HttpMethod {
@@ -78,11 +83,60 @@ fn default_address() -> String {
   return "0.0.0.0".to_string();
 }
 
-async fn http_handler(State(state): State<Arc<HttpTriggerConfig>>, request: Request) {
-  
+struct HttpState {
+  pub name: String,
+  pub config: HttpTriggerConfig,
+  pub agent: Arc<Agent>
 }
 
-pub async fn init_http(name: String, config: HttpConfig) -> Result<(), ServiceError> {
+#[derive(Serialize)]
+struct AgentResult {
+  error: Option<String>,
+  data: Option<AgentPayload>
+}
+
+async fn http_handler(State(state): State<Arc<HttpState>>, payload: String) -> Json<AgentResult> {
+  info!("Activating {} trigger via {} HTTP request on {}", state.name, state.config.method, state.config.path);
+  let mut system_prompt = format!(r#"
+The user activated the HTTP trigger named {}.
+The trigger is defined to respond to {} requests on {}.
+  "#, state.name, state.config.method, state.config.path);
+
+  if payload != "" {
+    info!("Received payload\n{}", payload);
+    system_prompt = format!(r#"
+{}
+The request contains a payload as well:
+{}
+    "#, system_prompt, payload);
+  }
+
+  let request = vec![
+    ChatMessage {
+      role: ChatMessageRole::Developer,
+      content: system_prompt
+    },
+    ChatMessage {
+      role: ChatMessageRole::User,
+      content: state.config.base.prompt.clone()
+    }
+  ]; 
+
+  let result = match state.agent.accept(request).await {
+    Ok(data) => AgentResult {
+      error: None,
+      data: Some(data)
+    },
+    Err(error) => AgentResult {
+      error: Some(error.to_string()),
+      data: None
+    }
+  };
+
+  return Json(result);
+}
+
+pub async fn init_http(name: String, config: HttpConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
   info!("Initializng {} service as http service @ http://{}:{}", name, config.address, config.port);
   let mut app = Router::new();
   for (trigger_name, trigger_config) in config.triggers {
@@ -96,7 +150,11 @@ pub async fn init_http(name: String, config: HttpConfig) -> Result<(), ServiceEr
     };
 
     let path = trigger_config.path.clone();
-    let state = Arc::new(trigger_config);
+    let state = Arc::new(HttpState {
+      name: trigger_name,
+      config: trigger_config,
+      agent: agent.clone()
+    });
     app = app.route(&path, handler.with_state(state));
   }
 
