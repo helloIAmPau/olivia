@@ -1,5 +1,6 @@
 pub mod llm_client;
 
+use std::collections::HashMap;
 use std::fmt::Result as FormatterResult;
 use std::fmt::Formatter;
 use std::fmt::Display;
@@ -29,7 +30,9 @@ pub enum AgentError {
   Request(ReqwestError),
   Model(&'static str, String),
   Parsing(ParsingError),
-  Completions(ChatRequest, ChatResponse)
+  Completions(ChatRequest, ChatResponse),
+  MaxIterations,
+  Agent(String)
 }
 
 impl Display for AgentError {
@@ -40,7 +43,9 @@ impl Display for AgentError {
       AgentError::Request(error) => write!(formatter, "Request Error - {}", error),
       AgentError::Parsing(error) => write!(formatter, "Parsing Error - {}", error),
       AgentError::Model(message, model) => write!(formatter, "[{}] Model Error - {}", model, message),
-      AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response)
+      AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
+      AgentError::MaxIterations => write!(formatter, "Max agegntic loop iterations reached. Aborted trigger"),
+      AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message)
     }
   }
 }
@@ -51,18 +56,26 @@ pub struct AgentConfig {
   pub model: String
 }
 
-#[derive(Deserialize, Serialize, PartialEq)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentPayloadState {
   Done,
-  Processing,
-  Error
+  Error,
+  Tool
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ToolParams {
+  pub name: String,
+  pub argument: HashMap<String, String>
 }
 
 #[derive(Deserialize, Serialize)]
 pub struct AgentPayload {
   pub state: AgentPayloadState,
-  pub result: String
+  pub result: Option<String>,
+  pub message: Option<String>,
+  pub params: Option<ToolParams>
 }
 
 const MAX_ITERATIONS: i32 = 3;
@@ -126,43 +139,48 @@ Please be as more coherent as possible to the format, do not add any markdown, b
     ];
     payload.extend_from_slice(&request);
 
-    let mut result = AgentPayload {
-      state: AgentPayloadState::Processing,
-      result: "".to_string()
-    };
-    while result.state == AgentPayloadState::Processing && iteration < MAX_ITERATIONS {
+    loop {
+      if iteration >= MAX_ITERATIONS {
+        return Err(AgentError::MaxIterations);
+      }
+
       iteration = iteration + 1;
       debug!("Agentic iteration {}/{}", iteration, MAX_ITERATIONS);
 
       let llm_result = match self.client.completions(self.config.model.to_string(), &payload).await {
         Ok(llm_result) => llm_result,
         Err(error) => {
-          if iteration == MAX_ITERATIONS {
-            return Err(error);
-          }
-
           error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
 
           continue;
         }
       };
 
-      result = match from_str(&llm_result.content) {
+      let result: AgentPayload = match from_str(&llm_result.content) {
         Ok(result) => result,
         Err(error) => {
-          if iteration == MAX_ITERATIONS {
-            return Err(AgentError::Parsing(error));
-          }
-
           error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
 
           continue;
         }
       };
 
-      iteration = 0;
-    }
+      match result.state {
+        AgentPayloadState::Done => {
+          return Ok(result);
+        },
+        AgentPayloadState::Error => {
+          let message = match result.message {
+            Some(message) => message,
+            None => "No error message".to_string()
+          };
 
-    return Ok(result);
+          return Err(AgentError::Agent(message));
+        },
+        AgentPayloadState::Tool => {
+          debug!("TODO");
+        }
+      }
+    }
   }
 }
