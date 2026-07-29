@@ -1,6 +1,6 @@
 use std::env::var;
 
-use serde_yaml::from_str;
+use serde_json::from_str;
 
 use reqwest::Client;
 use reqwest::header::HeaderMap;

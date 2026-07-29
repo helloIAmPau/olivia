@@ -8,8 +8,8 @@ use std::env::VarError;
 
 use serde::Deserialize;
 use serde::Serialize;
-use serde_yaml::Error as ParsingError;
-use serde_yaml::from_str;
+use serde_json::Error as ParsingError;
+use serde_json::from_str;
 use reqwest::header::InvalidHeaderValue;
 use reqwest::Error as ReqwestError;
 
@@ -44,7 +44,7 @@ impl Display for AgentError {
       AgentError::Parsing(error) => write!(formatter, "Parsing Error - {}", error),
       AgentError::Model(message, model) => write!(formatter, "[{}] Model Error - {}", model, message),
       AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
-      AgentError::MaxIterations => write!(formatter, "Max agegntic loop iterations reached. Aborted trigger"),
+      AgentError::MaxIterations => write!(formatter, "Max agentic loop iterations reached. Aborted trigger"),
       AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message)
     }
   }
@@ -159,7 +159,17 @@ Please be as more coherent as possible to the format, do not add any markdown, b
       let result: AgentPayload = match from_str(&llm_result.content) {
         Ok(result) => result,
         Err(error) => {
-          error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
+          let feedback = format!(r#"
+Error: Your response was not valid JSON or did not conform to the schema.
+Decoder error: {}
+Your output was:\n{}
+Please respond strictly with valid JSON conforming to the requested schema.
+          "#, error, llm_result.content);
+
+          payload.push(ChatMessage {
+            role: ChatMessageRole::Developer,
+            content: feedback
+          });
 
           continue;
         }

@@ -4,9 +4,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Result as FormatterResult;
 
+use toml::de::Error as TomlError;
+use toml::from_str;
+
 use tokio::fs::read_to_string;
 use serde::Deserialize;
-use serde_yaml::Error as SerdeError;
 use tracing::info;
 use tracing::debug;
 
@@ -16,7 +18,7 @@ use crate::agent::AgentConfig;
 #[derive(Debug)]
 pub enum ConfigError {
   Io(Error),
-  Parsing(SerdeError)
+  Parsing(TomlError)
 }
 
 impl Display for ConfigError {
@@ -36,7 +38,7 @@ pub struct Config {
 
 impl Config {
   pub async fn load() -> Result<Self, ConfigError> {
-    let config_path = "/config.yml";
+    let config_path = "/config.toml";
     info!("Loading config file in {}", config_path);
 
     let plain_config = match read_to_string(config_path).await {
@@ -47,7 +49,7 @@ impl Config {
     };
     debug!("Config content\n{}", plain_config);
 
-    let config = match serde_yaml::from_str(&plain_config) {
+    let config = match from_str(&plain_config) {
       Ok(config) => config,
       Err(error) => {
         return Err(ConfigError::Parsing(error));

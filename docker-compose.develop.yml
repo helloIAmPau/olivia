@@ -6,7 +6,7 @@ services:
       - 'RUST_LOG=debug'
     configs:
       - source: 'test'
-        target: '/config.yml'
+        target: '/config.toml'
     build:
       target: 'builder'
     volumes:
@@ -15,25 +15,27 @@ services:
 configs:
   test:
     content: |
-      agent:
-        model: 'ollama/gemma4'
-        prompt: 'You must help us with some simple tasks'
-      services:
-        test_http:
-          type: 'http'
-          triggers:
-            incoming_request:
-              path: '/testolo'
-              prompt: 'You received the following message from the user. Please do something'
-        second_http:
-          type: 'http'
-          port: 9000
-          triggers:
-            put_incoming_request:
-              method: 'put'
-              path: '/puttolo'
-              prompt: 'The request you receive contains a number. Concatenate the number with the string PUPUPPAPA'
-            post_incoming_request:
-              method: 'post'
-              path: '/postolo'
-              prompt: 'You received the following message from the user. Please do something'
+      [agent]
+      model = "ollama/gemma4"
+      prompt = "You must help us with some simple tasks"
+
+      [services.test_http]
+      type = "http"
+
+      [services.test_http.triggers.incoming_request]
+      path = "/testolo"
+      prompt = "You received the following message from the user. Please do something"
+
+      [services.second_http]
+      type = "http"
+      port = 9000
+
+      [services.second_http.triggers.put_incoming_request]
+      method = "put"
+      path = "/puttolo"
+      prompt = "The request you receive contains a number. Concatenate the number with the string PUPUPPAPA"
+
+      [services.second_http.triggers.post_incoming_request]
+      method = "post"
+      path = "/postolo"
+      prompt = "You received the following message from the user. Please do something"
