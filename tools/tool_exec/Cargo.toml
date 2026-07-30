@@ -1,0 +1,10 @@
+[package]
+name = "tool-exec"
+version = '0.0.0'
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1.4.1"

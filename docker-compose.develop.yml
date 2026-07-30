@@ -9,8 +9,21 @@ services:
         target: '/config.toml'
     build:
       target: 'builder'
+    depends_on:
+      - 'tools-builder'
     volumes:
       - './harness:/source'
+      - './data/tools:/tools:ro'
+  tools-builder:
+    image: 'olivia/tools:0.0.0'
+    restart: 'always'
+    build:
+      context: './tools'
+    networks:
+      - 'backend'
+    volumes:
+      - './tools:/source'
+      - './data/tools:/tools'
 
 configs:
   test:

@@ -2,10 +2,13 @@ SHELL := /bin/bash
 
 all:
 
-develop:
+tools:
+	docker build -t olivia/tools:0.0.0-dev ./tools
+
+develop: tools
 	source ./.env.develop && docker compose -f docker-compose.yml -f docker-compose.develop.yml up --build
 
-up:
-	docker compose up -d --build
+build: tools
+	docker build -t olivia/harness:0.0.0-dev ./harness
 
-.PHONY: all develop up
+.PHONY: all tools develop build

@@ -8,10 +8,11 @@ copy src /source/src
 
 run cd /source && cargo build --release
 
-cmd cd /source && cargo watch -x run
+cmd cd /source && cargo watch -w ./ -w /tools -x run
 
 from debian:stable-slim 
 
+copy --from=olivia/tools:0.0.0-dev /tools /tools
 copy --from=builder /source/target/release/harness /harness
 
 cmd /harness
