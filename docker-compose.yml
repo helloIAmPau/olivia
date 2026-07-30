@@ -4,13 +4,35 @@ services:
     restart: 'always'
     build:
       context: './harness'
+      target: 'builder'
+    ports:
+      - '9000:9000'
     environment:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
+      - 'RUST_LOG=debug'
+    configs:
+      - source: 'test'
+        target: '/config.toml'
     networks:
       - 'backend'
     depends_on:
       litellm:
         condition: 'service_healthy'
+      tools-builder:
+        condition: 'service_started'
+    volumes:
+      - './harness:/source'
+      - './data/tools:/tools:ro'
+  tools-builder:
+    image: 'olivia/tools:0.0.0'
+    restart: 'always'
+    build:
+      context: './tools'
+    networks:
+      - 'backend'
+    volumes:
+      - './tools:/source'
+      - './data/tools:/tools'
   litellm:
     image: 'ghcr.io/berriai/litellm:v1.93.0'
     restart: 'always'
@@ -32,15 +54,16 @@ services:
       test:
         - 'CMD-SHELL'
         - 'command -v curl > /dev/null 2>&1 || (apk update && apk add curl); curl -f http://localhost:4000/health/readiness || exit 1'
-      interval: '10s'
+      interval: '60s'
       timeout: '5s'
       retries: 5
-      start_period: '5s'
+      start_period: '30s'
+      start_interval: '3s'
   ollama:
     image: 'ollama/ollama:0.32.4'
     restart: 'always'
     environment:
-      - 'OLLAMA_LOG_LEVEL=warn'
+      - 'OLLAMA_DEBUG=false'
     volumes:
       - './data/ollama:/root/.ollama'
     networks:
@@ -49,10 +72,11 @@ services:
       test:
         - 'CMD-SHELL'
         - 'command -v curl > /dev/null 2>&1 || (apt-get update && apt-get install -y curl); curl -f http://localhost:11434/ || exit 1'
-      interval: '10s'
+      interval: '60s'
       timeout: '5s'
       retries: 5
-      start_period: '5s'
+      start_period: '30s'
+      start_interval: '3s'
 
 networks:
   backend:
@@ -66,3 +90,29 @@ configs:
           litellm_params:
             model: 'ollama/gemma4:12b'
             api_base: 'http://ollama:11434'
+  test:
+    content: |
+      [agent]
+      model = "ollama/gemma4"
+      prompt = "You must help us with some simple tasks"
+
+      [services.test_http]
+      type = "http"
+
+      [services.test_http.triggers.incoming_request]
+      path = "/testolo"
+      prompt = "You received the following message from the user. Please do something"
+
+      [services.second_http]
+      type = "http"
+      port = 9000
+
+      [services.second_http.triggers.put_incoming_request]
+      method = "put"
+      path = "/puttolo"
+      prompt = "The request you receive contains a number. Concatenate the number with the string PUPUPPAPA"
+
+      [services.second_http.triggers.post_incoming_request]
+      method = "post"
+      path = "/postolo"
+      prompt = "You must simulate a error flow. just return that you have failed for sbiridibory reason"

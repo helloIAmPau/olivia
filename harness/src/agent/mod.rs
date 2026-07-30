@@ -1,6 +1,7 @@
 pub mod llm_client;
+pub mod tool_registry;
 
-use std::collections::HashMap;
+use std::io::Error as IoError;
 use std::fmt::Result as FormatterResult;
 use std::fmt::Formatter;
 use std::fmt::Display;
@@ -10,13 +11,18 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Error as ParsingError;
 use serde_json::from_str;
+use serde_json::to_string;
 use reqwest::header::InvalidHeaderValue;
 use reqwest::Error as ReqwestError;
 
 use tracing::debug;
 use tracing::error;
 
+use schemars::JsonSchema;
+use schemars::schema_for;
+
 use llm_client::LLMClient;
+use tool_registry::ToolRegistry;
 
 use crate::agent::llm_client::ChatMessage;
 use crate::agent::llm_client::ChatMessageRole;
@@ -32,12 +38,14 @@ pub enum AgentError {
   Parsing(ParsingError),
   Completions(ChatRequest, ChatResponse),
   MaxIterations,
-  Agent(String)
+  Agent(String),
+  Io(IoError)
 }
 
 impl Display for AgentError {
   fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
     return match self {
+      AgentError::Io(error) => write!(formatter, "Io Error - {}", error),
       AgentError::Var(name, error) => write!(formatter, "Var Error - {} {}", name, error),
       AgentError::InvalidHeaderValue(error) => write!(formatter, "Invalid Header Value Error - {}", error),
       AgentError::Request(error) => write!(formatter, "Request Error - {}", error),
@@ -56,7 +64,7 @@ pub struct AgentConfig {
   pub model: String
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentPayloadState {
   Done,
@@ -64,25 +72,26 @@ pub enum AgentPayloadState {
   Tool
 }
 
-#[derive(Deserialize, Serialize)]
-pub struct ToolParams {
-  pub name: String,
-  pub argument: HashMap<String, String>
-}
-
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct AgentPayload {
+  /// the execution result
   pub state: AgentPayloadState,
+  /// your output, if any, if the execution succeded 
   pub result: Option<String>,
+  /// your error message, if any, if the execution failed
   pub message: Option<String>,
-  pub params: Option<ToolParams>
+  /// the name of the tool to use. Only set for state = tool
+  pub name: Option<String>,
+  /// a json string rapresenting the tool parameters. Only set for state = tool
+  pub params: Option<String>
 }
 
 const MAX_ITERATIONS: i32 = 3;
 
 pub struct Agent {
   client: LLMClient,
-  config: AgentConfig
+  config: AgentConfig,
+  registry: ToolRegistry
 }
 
 impl Agent {
@@ -109,9 +118,17 @@ impl Agent {
 
     debug!("Model {} found", config.model);
 
+    let registry = match ToolRegistry::new().await {
+      Ok(registry) => registry,
+      Err(error) => {
+        return Err(error);
+      }
+    };
+
     let agent = Self {
       client,
-      config
+      config,
+      registry
     };
 
     return Ok(agent);
@@ -120,15 +137,36 @@ impl Agent {
   pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentPayload, AgentError> {
     debug!("Agent accepted a new request");
 
-    let context = r#"
-Your name is OlivIA, an artificial intelligence built to help human in different tasks.
-You are the brain of a more complex system composed by an harness, some triggers and some tools.
-Eventually you will be prompted to execute some task via trigger. You must do all you can do to achieve the result.
-I ask you to respond using a structured message, in JSON, shapepd like the following:
-* if you finished the task succesfully return { "state": "done", "result": "your content" }
-* if an error occurs return { "state": "error", "message": "the error message" }
-Please be as more coherent as possible to the format, do not add any markdown, but reply only with the deserializable json.
-    "#;
+    let output_schema = schema_for!(AgentPayload);
+    let output_schema_json = match to_string(&output_schema) {
+      Ok(output_schema_json) => output_schema_json,
+      Err(error) => {
+        return Err(AgentError::Parsing(error));
+      }
+    };
+
+    let context = format!(r#"
+You are OlivIA, a strict AI task coordinator. Your SOLE function is to analyze requests and delegate them to external tools. 
+
+CRITICAL BEHAVIORAL RULES:
+1. ZERO INTERNAL LOGIC: Do NOT calculate, summarize, or attempt to fulfill the task using your internal knowledge. 
+2. ALWAYS DELEGATE: You must use the provided tools to execute ANY action, retrieve ANY information, or process ANY logic. You are a router, not a solver.
+3. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
+
+OUTPUT SCHEMA:
+Your response must strictly adhere to the following JSON schema:
+{}
+
+TOOL USAGE:
+Because you do not execute logic yourself, your default response state should be calling a tool.
+To execute a tool, your JSON output must reflect the following:
+- "state": "tool"
+- "name": "<exact_tool_name>"
+- "params": <JSON_object_of_parameters>
+
+AVAILABLE TOOLS:
+{}
+    "#, output_schema_json, self.registry.prompt);
 
     let mut iteration = 0;
     let mut payload = vec![
