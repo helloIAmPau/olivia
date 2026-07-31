@@ -1,11 +1,9 @@
 SHELL := /bin/bash
 .ONESHELL:
 
-# Use the tag on the current commit if there is one, otherwise the short hash.
 VERSION := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
 export VERSION
 
-# Workspace crates kept on a single version, updated by `make bump`.
 MANIFESTS := harness/Cargo.toml tools/common/Cargo.toml tools/exec/Cargo.toml
 
 all:
@@ -16,8 +14,6 @@ develop:
 build:
 	docker build -t olivia/harness:$(VERSION) .
 
-# Bump the workspace version, then commit and tag it (like `npm version`).
-# Usage: make bump <patch|minor|major>
 bump:
 	@set -euo pipefail
 	level='$(filter-out $@,$(MAKECMDGOALS))'
@@ -52,7 +48,6 @@ bump:
 	git tag "$$tag"
 	echo "Committed and tagged $$tag"
 
-# Absorb the level word so `make bump patch` doesn't error on 'patch' as a goal.
 patch minor major:
 	@:
 

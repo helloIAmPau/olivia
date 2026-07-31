@@ -1,6 +1,6 @@
 services:
   harness:
-    image: 'olivia/harness:${VERSION:-dev}'
+    image: 'olivia/harness:${VERSION:-0.0.0}-next'
     restart: 'always'
     build:
       context: '.'
@@ -24,7 +24,7 @@ services:
       - '.:/source'
       - './data/tools:/tools:ro'
   tools-builder:
-    image: 'olivia/tools:${VERSION:-dev}'
+    image: 'olivia/tools:${VERSION:-0.0.0}-next'
     restart: 'always'
     build:
       context: '.'
