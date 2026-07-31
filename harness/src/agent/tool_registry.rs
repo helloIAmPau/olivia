@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use tokio::fs::read_dir;
 
@@ -26,8 +27,21 @@ pub struct ToolInfo {
   pub params: Schema
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolOutputState {
+  Done,
+  Error
+}
+
+#[derive(Deserialize)]
+pub struct ToolOutput {
+  pub state: ToolOutputState,
+  pub output: String
+}
+
 pub struct ToolRegistry {
-  tools: HashMap<String, Plugin>,
+  tools: HashMap<String, Mutex<Plugin>>,
   pub prompt: String
 }
 
@@ -97,12 +111,44 @@ impl ToolRegistry {
       };
 
       prompt = format!("{}\n{}", prompt, info_json);
-      tools.insert(info.name, tool);
+      tools.insert(info.name, Mutex::new(tool));
     }
 
     return Ok(ToolRegistry {
       tools,
       prompt
     });
+  }
+
+  pub fn run(&self, name: String, params: String) -> Result<String, AgentError> {
+    let tool_mutex = match self.tools.get(&name) {
+      Some(tool_mutex) => tool_mutex,
+      None => {
+        return Err(AgentError::InvalidToolInput(name, params, "This tool does not exist in the registry"));
+      }
+    };
+
+    let mut tool = match tool_mutex.lock() {
+      Ok(tool) => tool,
+      Err(error) => {
+        return Err(AgentError::Lock(error.to_string()));
+      }
+    };
+
+    let Json(tool_output): Json<ToolOutput> = match tool.call("execute", params) {
+      Ok(tool_output) => tool_output,
+      Err(error) => {
+        return Err(AgentError::Tool(error.to_string()));
+      }
+    };
+
+    match tool_output.state {
+      ToolOutputState::Done => {
+        return Ok(tool_output.output);
+      },
+      ToolOutputState::Error => {
+        return Err(AgentError::Tool(tool_output.output));
+      }
+    };
   }
 }

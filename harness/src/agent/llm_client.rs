@@ -20,7 +20,8 @@ pub enum ChatMessageRole {
   User,
   Developer,
   System,
-  Assistant
+  Assistant,
+  Tool
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

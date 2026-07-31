@@ -3,11 +3,13 @@ use extism_pdk::FnResult;
 use extism_pdk::Json;
 
 use serde::Deserialize;
-use serde::Serialize;
 
 use schemars::JsonSchema;
 use schemars::schema_for;
-use schemars::Schema;
+
+use tool_common::ToolInfo;
+use tool_common::ToolOutput;
+use tool_common::ToolOutputState;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ExecParams {
@@ -15,18 +17,11 @@ pub struct ExecParams {
   pub script: String
 }
 
-#[derive(Serialize)]
-pub struct ExecInfo {
-  pub name: &'static str,
-  pub description: &'static str,
-  pub params: Schema
-}
-
 #[plugin_fn]
-pub fn info() -> FnResult<Json<ExecInfo>> {
-  let info = ExecInfo {
-    name: "exec",
-    description: "This tool executes a command on host machine. You can use it to execute bash scripts.",
+pub fn info() -> FnResult<Json<ToolInfo>> {
+  let info = ToolInfo {
+    name: "exec".to_string(),
+    description: "This tool executes a command on host machine. You can use it to execute bash scripts.".to_string(),
     params: schema_for!(ExecParams)
   };
 
@@ -34,6 +29,11 @@ pub fn info() -> FnResult<Json<ExecInfo>> {
 }
 
 #[plugin_fn]
-pub fn execute() -> FnResult<()> {
-  return Ok(());
+pub fn execute(Json(params): Json<ExecParams>) -> FnResult<Json<ToolOutput>> {
+  println!("{}", params.script);
+
+  return Ok(Json(ToolOutput {
+    state: ToolOutputState::Error,
+    output: "Not Implemented!".to_string()
+  }));
 }

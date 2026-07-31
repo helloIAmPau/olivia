@@ -39,7 +39,10 @@ pub enum AgentError {
   Completions(ChatRequest, ChatResponse),
   MaxIterations,
   Agent(String),
-  Io(IoError)
+  Io(IoError),
+  InvalidToolInput(String, String, &'static str),
+  Tool(String),
+  Lock(String)
 }
 
 impl Display for AgentError {
@@ -53,7 +56,10 @@ impl Display for AgentError {
       AgentError::Model(message, model) => write!(formatter, "[{}] Model Error - {}", model, message),
       AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
       AgentError::MaxIterations => write!(formatter, "Max agentic loop iterations reached. Aborted trigger"),
-      AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message)
+      AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message),
+      AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
+      AgentError::Lock(error) => write!(formatter, "Lock Error - {}", error),
+      AgentError::InvalidToolInput(name, params, message) => write!(formatter, "Invalid Tool Input Error - {} {}({})", message, name, params)
     }
   }
 }
@@ -185,8 +191,8 @@ AVAILABLE TOOLS:
       iteration = iteration + 1;
       debug!("Agentic iteration {}/{}", iteration, MAX_ITERATIONS);
 
-      let llm_result = match self.client.completions(self.config.model.to_string(), &payload).await {
-        Ok(llm_result) => llm_result,
+      let assistant_chat_message = match self.client.completions(self.config.model.to_string(), &payload).await {
+        Ok(assistant_chat_message) => assistant_chat_message,
         Err(error) => {
           error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
 
@@ -194,15 +200,29 @@ AVAILABLE TOOLS:
         }
       };
 
-      let result: AgentPayload = match from_str(&llm_result.content) {
-        Ok(result) => result,
+      payload.push(assistant_chat_message.clone());
+
+      let agent_payload: AgentPayload = match from_str(&assistant_chat_message.content) {
+        Ok(agent_payload) => agent_payload,
         Err(error) => {
           let feedback = format!(r#"
-Error: Your response was not valid JSON or did not conform to the schema.
+SYSTEM ERROR: JSON DESERIALIZATION FAILED.
+
+The system attempted to parse your last response but failed.
 Decoder error: {}
-Your output was:\n{}
-Please respond strictly with valid JSON conforming to the requested schema.
-          "#, error, llm_result.content);
+
+<your_invalid_response>
+{}
+</your_invalid_response>
+
+CRITICAL CORRECTION INSTRUCTIONS:
+1. Identify the structural error pointed out by the Decoder error.
+2. Strip ALL markdown formatting (do NOT use ```json fences).
+3. Remove ALL conversational text before or after the JSON.
+4. Ensure strictly valid JSON syntax (no trailing commas, proper quotes).
+
+Rewrite your response immediately as a single, raw, valid JSON object.
+          "#, error, assistant_chat_message.content);
 
           payload.push(ChatMessage {
             role: ChatMessageRole::Developer,
@@ -213,12 +233,12 @@ Please respond strictly with valid JSON conforming to the requested schema.
         }
       };
 
-      match result.state {
+      match agent_payload.state {
         AgentPayloadState::Done => {
-          return Ok(result);
+          return Ok(agent_payload);
         },
         AgentPayloadState::Error => {
-          let message = match result.message {
+          let message = match agent_payload.message {
             Some(message) => message,
             None => "No error message".to_string()
           };
@@ -226,7 +246,81 @@ Please respond strictly with valid JSON conforming to the requested schema.
           return Err(AgentError::Agent(message));
         },
         AgentPayloadState::Tool => {
-          debug!("TODO");
+          let params = match agent_payload.params {
+            Some(params) => params,
+            None => "".to_string()
+          };
+
+          let name = match agent_payload.name {
+            Some(name) => name,
+            None => "".to_string()
+          };
+
+          let tool_output = match self.registry.run(name, params) {
+            Ok(tool_output) => {
+              format!(r#"
+TOOL EXECUTED
+
+<your_request>
+{}
+</your_request>
+
+<result>
+{}
+</result>
+              "#, assistant_chat_message.content, tool_output)
+            },
+            Err(AgentError::InvalidToolInput(bad_name, bad_params, message)) => {
+              format!(r#"
+SYSTEM ERROR: INVALID TOOL EXECUTION REQUEST.
+
+Your JSON was structurally valid, but the tool request failed semantic validation. 
+Error Details: You attempted to call a tool named '{}' with parameters '{}'. {}.
+
+<your_invalid_request>
+{}
+</your_invalid_request>
+
+CRITICAL CORRECTION INSTRUCTIONS:
+1. Tool Name: You may ONLY use the exact tool names provided in the system registry. Do not invent tools.
+2. Review the available tools below and correct your request.
+
+AVAILABLE TOOLS:
+{}
+
+Rewrite your response immediately as a single, raw, valid JSON object calling a valid tool.
+              "#, bad_name, bad_params, message, assistant_chat_message.content, self.registry.prompt)
+            },
+            Err(error) => {
+              format!(r#"
+TOOL EXECUTION FAILED
+
+The system attempted to run the tool, but it encountered an internal error.
+
+<your_request>
+{}
+</your_request>
+
+<error_result>
+{}
+</error_result>
+
+INSTRUCTIONS:
+The tool failed. Do not blindly repeat the exact same request. 
+You must decide the next best action:
+1. Retry the tool with different parameters.
+2. Use a different fallback tool.
+3. If no other options exist, change your state to "error" and inform the user.
+
+Respond immediately with your next JSON action.
+              "#, assistant_chat_message.content, error)
+            }
+          };
+
+          payload.push(ChatMessage {
+            role: ChatMessageRole::Tool,
+            content: tool_output
+          });
         }
       }
     }
