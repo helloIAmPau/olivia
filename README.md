@@ -72,7 +72,7 @@ WebAssembly. Each plugin lives in the `tools/` Cargo workspace, targets
 The `tools-builder` service compiles every plugin and drops the resulting
 `.wasm` files into `data/tools`, which is mounted read-only into the harness at
 `/tools`. In development it watches the sources and rebuilds on change. The
-bundled `tool_exec` plugin runs a bash script on the host.
+bundled `exec` plugin runs a bash script on the host.
 
 > Harness-side loading of `/tools` into the agent loop (the `tool` state of the
 > response envelope) is in progress.
@@ -214,7 +214,7 @@ docker compose exec ollama ollama pull gemma4:12b
 ├── tools/                       # Tool plugins (Extism / WASM) — Cargo workspace
 │   ├── Cargo.toml
 │   ├── Dockerfile
-│   └── tool_exec/               # Bundled plugin: run a bash script on the host
+│   └── exec/               # Bundled plugin: run a bash script on the host
 └── harness/                     # Rust service
     ├── Cargo.toml
     ├── Dockerfile

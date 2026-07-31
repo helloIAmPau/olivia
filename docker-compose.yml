@@ -1,9 +1,9 @@
 services:
   harness:
-    image: 'olivia/harness:0.0.0'
+    image: 'olivia/harness:${VERSION:-dev}'
     restart: 'always'
     build:
-      context: './harness'
+      context: '.'
       target: 'builder'
     ports:
       - '9000:9000'
@@ -21,17 +21,18 @@ services:
       tools-builder:
         condition: 'service_started'
     volumes:
-      - './harness:/source'
+      - '.:/source'
       - './data/tools:/tools:ro'
   tools-builder:
-    image: 'olivia/tools:0.0.0'
+    image: 'olivia/tools:${VERSION:-dev}'
     restart: 'always'
     build:
-      context: './tools'
+      context: '.'
+      target: 'tools'
     networks:
       - 'backend'
     volumes:
-      - './tools:/source'
+      - '.:/source'
       - './data/tools:/tools'
   litellm:
     image: 'ghcr.io/berriai/litellm:v1.93.0'

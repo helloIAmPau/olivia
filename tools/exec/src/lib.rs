@@ -7,9 +7,9 @@ use serde::Deserialize;
 use schemars::JsonSchema;
 use schemars::schema_for;
 
-use tool_common::ToolInfo;
-use tool_common::ToolOutput;
-use tool_common::ToolOutputState;
+use common::ToolInfo;
+use common::ToolOutput;
+use common::ToolOutputState;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ExecParams {

@@ -1,5 +1,5 @@
 [package]
-name = "tool-exec"
+name = "exec"
 version = '0.0.0'
 edition = "2024"
 
@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-tool_common = { path = "../tool_common" }
+common = { path = "../common" }
 extism-pdk = "1.4.1"
 serde = { version = "1.0.229", features = ["derive"] }
 schemars = "1.2.2"

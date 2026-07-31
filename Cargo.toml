@@ -1,0 +1,4 @@
+[workspace]
+resolver = "3"
+members = ["harness", "tools/common", "tools/exec"]
+default-members = ["harness"]

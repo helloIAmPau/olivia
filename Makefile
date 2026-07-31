@@ -1,14 +1,59 @@
 SHELL := /bin/bash
+.ONESHELL:
+
+# Use the tag on the current commit if there is one, otherwise the short hash.
+VERSION := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
+export VERSION
+
+# Workspace crates kept on a single version, updated by `make bump`.
+MANIFESTS := harness/Cargo.toml tools/common/Cargo.toml tools/exec/Cargo.toml
 
 all:
 
-tools:
-	docker build -t olivia/tools:0.0.0-dev ./tools
-
-develop: tools
+develop:
 	source ./.env.develop && docker compose up --build
 
-build: tools
-	docker build -t olivia/harness:0.0.0-dev ./harness
+build:
+	docker build -t olivia/harness:$(VERSION) .
 
-.PHONY: all tools develop build
+# Bump the workspace version, then commit and tag it (like `npm version`).
+# Usage: make bump <patch|minor|major>
+bump:
+	@set -euo pipefail
+	level='$(filter-out $@,$(MAKECMDGOALS))'
+	case "$$level" in
+	  patch|minor|major) ;;
+	  *) echo "usage: make bump <patch|minor|major>" >&2; exit 1 ;;
+	esac
+	if ! git diff-index --quiet HEAD --; then
+	  echo "error: working tree has uncommitted changes; commit or stash first" >&2
+	  exit 1
+	fi
+	current=$$(grep -m1 -E '^version[[:space:]]*=' harness/Cargo.toml | tr -dc '0-9.')
+	if [[ -z "$$current" ]]; then echo "error: could not read current version" >&2; exit 1; fi
+	IFS=. read -r major minor patch <<< "$$current"
+	case "$$level" in
+	  major) major=$$((major + 1)); minor=0; patch=0 ;;
+	  minor) minor=$$((minor + 1)); patch=0 ;;
+	  patch) patch=$$((patch + 1)) ;;
+	esac
+	next="$$major.$$minor.$$patch"
+	tag="v$$next"
+	if git rev-parse -q --verify "refs/tags/$$tag" >/dev/null; then
+	  echo "error: tag $$tag already exists" >&2
+	  exit 1
+	fi
+	echo "Bumping $$current -> $$next"
+	for m in $(MANIFESTS); do
+	  sed -i -E "s/^version[[:space:]]*=.*/version = \"$$next\"/" "$$m"
+	done
+	git add $(MANIFESTS)
+	git commit -m "churn: bump version to $$tag"
+	git tag "$$tag"
+	echo "Committed and tagged $$tag"
+
+# Absorb the level word so `make bump patch` doesn't error on 'patch' as a goal.
+patch minor major:
+	@:
+
+.PHONY: all develop build bump patch minor major

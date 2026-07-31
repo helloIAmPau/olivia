@@ -12,33 +12,13 @@ use extism::Wasm;
 use extism::Manifest;
 use extism::convert::Json;
 
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::to_string;
 
-use schemars::Schema;
+use common::ToolInfo;
+use common::ToolOutput;
+use common::ToolOutputState;
 
 use crate::agent::AgentError;
-
-#[derive(Deserialize, Serialize)]
-pub struct ToolInfo {
-  pub name: String,
-  pub description: String,
-  pub params: Schema
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ToolOutputState {
-  Done,
-  Error
-}
-
-#[derive(Deserialize)]
-pub struct ToolOutput {
-  pub state: ToolOutputState,
-  pub output: String
-}
 
 pub struct ToolRegistry {
   tools: HashMap<String, Mutex<Plugin>>,
