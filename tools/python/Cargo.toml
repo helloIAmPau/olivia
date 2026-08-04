@@ -1,0 +1,20 @@
+[package]
+name = "python"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.60.0"
+# Builtins-only interpreter. We deliberately avoid the `stdlib` feature /
+# rustpython-stdlib: its 0.5.0 release fails to compile (two incompatible
+# malachite-bigint versions via its own `pymath` dep). rustpython-vm alone keeps
+# the compiler (default feature) and pulls neither rustpython-stdlib nor pymath.
+# Cost: no importable stdlib modules (math, json, ...), full language otherwise.
+rustpython-vm = "0.5.0"
+
+schemars = "1.2.2"
+serde_json = "1.0.151"
+serde = { version = "1.0.229", features = ["derive"] }
