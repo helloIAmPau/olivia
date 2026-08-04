@@ -201,6 +201,27 @@ environment, no filesystem preopens, no network. Every invocation also gets a
 > tool's `WasiCtx`. It is never implicit — treat every grant as widening the
 > trust boundary.
 
+### Bundled tools
+
+| Tool     | Path            | Params              | What it does                                                                 |
+| -------- | --------------- | ------------------- | --------------------------------------------------------------------------- |
+| `hello`  | `tools/hello/`  | `{ "suffix": … }`   | Reference implementation — returns `Hello <suffix>`.                        |
+| `python` | `tools/python/` | `{ "script": … }`   | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter, inside the same wasm sandbox. |
+
+The `python` tool returns whatever the script assigns to the global
+`__OLIVIA__FINAL__RESULT__` (coerced to a string); `print()` and `return` are not
+used for the result.
+
+> [!NOTE]
+> `python` runs **builtins-only**: the full language is available (variables,
+> arithmetic, `str`/`list`/`dict`, comprehensions, functions, classes,
+> exceptions), but there is **no importable standard library** — `import math`,
+> `import json`, etc. raise `ModuleNotFoundError`. The released
+> `rustpython-stdlib 0.5.0` does not compile (it pulls two incompatible
+> `malachite-bigint` versions), so the interpreter is built with
+> `rustpython-vm` alone. Restoring the stdlib means pinning RustPython to a fixed
+> git revision, or waiting for a corrected `rustpython-stdlib` release.
+
 ## Supported Guest Languages
 
 A tool is just a component implementing `tool-world`, so any toolchain that
