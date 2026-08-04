@@ -1,29 +1,31 @@
 from rust:1.94.1-slim as base
 
+run rustup target add wasm32-wasip2
 run cargo install cargo-watch
-
-env CARGO_TARGET_DIR=/target
-workdir /source
-
-copy Cargo.toml ./Cargo.toml
-copy harness ./harness
-copy tools ./tools
 
 from base as tools
 
-run rustup target add wasm32-unknown-unknown
+run cargo install cargo-component --locked
 
-run mkdir -p /tools \
- && cargo build --release -p exec --target wasm32-unknown-unknown \
- && cp -rfv /target/wasm32-unknown-unknown/release/*.wasm /tools
+run mkdir -p /tools
 
-cmd cargo watch -w tools -x 'build -p exec --target wasm32-unknown-unknown' -s 'cp -rfv /target/wasm32-unknown-unknown/debug/*.wasm /tools'
+copy tools /source/tools
+workdir /source/tools
+
+run cargo component build --release --target=wasm32-wasip2
+run cp -rfv ./target/wasm32-wasip2/release/*.wasm /tools
+
+cmd cargo watch -x 'component build --target=wasm32-wasip2' -s 'cp -rfv ./target/wasm32-wasip2/debug/*.wasm /tools'
 
 from base as builder
 
-run cargo build --release -p harness
+copy harness /source/harness
+copy tools/tool.wit /source/tools/tool.wit
+workdir /source/harness
 
-cmd cargo watch -w harness -w tools/common -x 'run -p harness'
+run cargo build --release
+
+cmd cargo watch -w . -w /tools -x 'run'
 
 from debian:stable-slim
 

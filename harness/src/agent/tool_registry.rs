@@ -1,27 +1,18 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::Arc;
 
 use tokio::fs::read_dir;
 
 use tracing::info;
 use tracing::debug;
-use tracing::warn;
 
-use extism::Plugin;
-use extism::Wasm;
-use extism::Manifest;
-use extism::convert::Json;
-
-use serde_json::to_string;
-
-use common::ToolInfo;
-use common::ToolOutput;
-use common::ToolOutputState;
-
+use crate::agent::tool::ToolEngine;
+use crate::agent::tool::Tool;
+ use crate::agent::tool::ToolOutputState;
 use crate::agent::AgentError;
 
 pub struct ToolRegistry {
-  tools: HashMap<String, Mutex<Plugin>>,
+  tools: HashMap<String, Tool>,
   pub prompt: String
 }
 
@@ -31,6 +22,12 @@ impl ToolRegistry {
     info!("Loading tools from folder {}", tools_folder);
     let mut tools = HashMap::new();
     let mut prompt = "".to_string();
+    let engine = match ToolEngine::new().await {
+      Ok(engine) => engine,
+      Err(error) => {
+        return Err(error);
+      }
+    };
 
     let mut entries = match read_dir(tools_folder).await {
       Ok(entries) => entries,
@@ -39,6 +36,7 @@ impl ToolRegistry {
       }
     };
 
+    let engine_arc = Arc::new(engine);
     loop {
       let entry = match entries.next_entry().await {
         Ok(Some(entry)) => entry,
@@ -61,37 +59,22 @@ impl ToolRegistry {
       }
 
       debug!("Loading tool {}", tool_path.display());
-      let wasm = Wasm::file(&tool_path);
-      let manifest = Manifest::new([wasm]);
-      let mut tool = match Plugin::new(&manifest, [], true) {
+      let tool = match Tool::new(tool_path, engine_arc.clone()) {
         Ok(tool) => tool,
         Err(error) => {
-          warn!("Unable to load tool {}: {}", tool_path.display(), error);
-
-          continue;
+          return Err(error);
         }
       };
 
-      let Json(info): Json<ToolInfo> = match tool.call("info", "") {
+      let info = match tool.info().await {
         Ok(info) => info,
         Err(error) => {
-          warn!("Unable to load tool {}: {}", tool_path.display(), error);
-
-          continue;
+          return Err(error);
         }
       };
 
-      let info_json = match to_string(&info) {
-        Ok(info_json) => info_json,
-        Err(error) => {
-          warn!("Unable to load tool {}: {}", tool_path.display(), error);
-
-          continue;
-        }
-      };
-
-      prompt = format!("{}\n{}", prompt, info_json);
-      tools.insert(info.name, Mutex::new(tool));
+      prompt = format!("{}\nname: {}\ndescription: {}\ninput schema: {}\n", prompt, info.name, info.description, info.schema);
+      tools.insert(info.name, tool);
     }
 
     return Ok(ToolRegistry {
@@ -100,34 +83,27 @@ impl ToolRegistry {
     });
   }
 
-  pub fn run(&self, name: String, params: String) -> Result<String, AgentError> {
-    let tool_mutex = match self.tools.get(&name) {
-      Some(tool_mutex) => tool_mutex,
+  pub async fn run(&self, name: String, params: String) -> Result<String, AgentError> {
+    let tool = match self.tools.get(&name) {
+      Some(tool) => tool,
       None => {
         return Err(AgentError::InvalidToolInput(name, params, "This tool does not exist in the registry"));
       }
     };
 
-    let mut tool = match tool_mutex.lock() {
-      Ok(tool) => tool,
-      Err(error) => {
-        return Err(AgentError::Lock(error.to_string()));
-      }
-    };
-
-    let Json(tool_output): Json<ToolOutput> = match tool.call("execute", params) {
-      Ok(tool_output) => tool_output,
+    let output = match tool.run(params).await {
+      Ok(output) => output,
       Err(error) => {
         return Err(AgentError::Tool(error.to_string()));
       }
     };
 
-    match tool_output.state {
+    match output.state {
       ToolOutputState::Done => {
-        return Ok(tool_output.output);
+        return Ok(output.content);
       },
       ToolOutputState::Error => {
-        return Err(AgentError::Tool(tool_output.output));
+        return Err(AgentError::Tool(output.content));
       }
     };
   }

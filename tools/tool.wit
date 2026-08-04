@@ -1,0 +1,22 @@
+package olivia:tools;
+
+world tool-world {
+  record tool-info {
+    name: string,
+    description: string,
+    schema: string
+  }
+
+  enum tool-output-state {
+    done,
+    error
+  }
+
+  record tool-output {
+    state: tool-output-state,
+    content: string
+  }
+
+  export info: func() -> tool-info;
+  export run: func(input: string) -> tool-output; 
+}

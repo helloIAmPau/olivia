@@ -1,5 +1,6 @@
 pub mod llm_client;
 pub mod tool_registry;
+pub mod tool;
 
 use std::io::Error as IoError;
 use std::fmt::Result as FormatterResult;
@@ -12,8 +13,11 @@ use serde::Serialize;
 use serde_json::Error as ParsingError;
 use serde_json::from_str;
 use serde_json::to_string;
+
 use reqwest::header::InvalidHeaderValue;
 use reqwest::Error as ReqwestError;
+
+use wasmtime::Error as WasmError;
 
 use tracing::debug;
 use tracing::error;
@@ -42,7 +46,8 @@ pub enum AgentError {
   Io(IoError),
   InvalidToolInput(String, String, &'static str),
   Tool(String),
-  Lock(String)
+  Lock(String),
+  Wasm(WasmError)
 }
 
 impl Display for AgentError {
@@ -59,6 +64,7 @@ impl Display for AgentError {
       AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message),
       AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
       AgentError::Lock(error) => write!(formatter, "Lock Error - {}", error),
+      AgentError::Wasm(error) => write!(formatter, "Wasm Error - {}", error),
       AgentError::InvalidToolInput(name, params, message) => write!(formatter, "Invalid Tool Input Error - {} {}({})", message, name, params)
     }
   }
@@ -256,7 +262,7 @@ Rewrite your response immediately as a single, raw, valid JSON object.
             None => "".to_string()
           };
 
-          let tool_output = match self.registry.run(name, params) {
+          let tool_output = match self.registry.run(name, params).await {
             Ok(tool_output) => {
               format!(r#"
 TOOL EXECUTED

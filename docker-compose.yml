@@ -9,7 +9,7 @@ services:
       - '9000:9000'
     environment:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
-#      - 'RUST_LOG=debug'
+      - 'RUST_LOG=debug'
     configs:
       - source: 'test'
         target: '/config.toml'
@@ -63,6 +63,14 @@ services:
   ollama:
     image: 'ollama/ollama:0.32.4'
     restart: 'always'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: 'nvidia'
+              count: 'all'
+              capabilities:
+                - 'gpu'
     environment:
       - 'OLLAMA_DEBUG=false'
       - 'OLLAMA_DEBUG_LOG_REQUESTS=true'
@@ -109,12 +117,12 @@ configs:
       type = "http"
       port = 9000
 
-      [services.second_http.triggers.put_incoming_request]
+      [services.second_http.triggers.hello]
       method = "put"
-      path = "/puttolo"
-      prompt = "The request you receive contains a number. Concatenate the number with the string PUPUPPAPA"
+      path = "/hello"
+      prompt = "Generate a classic Hello Something using the content of the request"
 
-      [services.second_http.triggers.post_incoming_request]
+      [services.second_http.triggers.error]
       method = "post"
-      path = "/postolo"
+      path = "/error"
       prompt = "You must simulate a error flow. just return that you have failed for sbiridibory reason"
