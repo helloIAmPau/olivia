@@ -58,7 +58,7 @@ impl ToolRegistry {
         continue;
       }
 
-      debug!("Loading tool {}", tool_path.display());
+      info!("Loading tool {}", tool_path.display());
       let tool = match Tool::new(tool_path, engine_arc.clone()) {
         Ok(tool) => tool,
         Err(error) => {
@@ -73,6 +73,7 @@ impl ToolRegistry {
         }
       };
 
+      info!("{:#?}", info);
       prompt = format!("{}\nname: {}\ndescription: {}\ninput schema: {}\n", prompt, info.name, info.description, info.schema);
       tools.insert(info.name, tool);
     }

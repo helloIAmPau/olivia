@@ -8,6 +8,7 @@ use reqwest::header::AUTHORIZATION;
 use reqwest::header::HeaderValue;
 
 use tracing::debug;
+use tracing::info;
 
 use serde::Serialize;
 use serde::Deserialize;
@@ -127,7 +128,7 @@ impl LLMClient {
       messages: messages.to_vec()
     };
 
-    debug!("Sending request\n{:#?}", body);
+    info!("Sending request\n{:#?}", body);
 
     let response = match self.client.post(&url).json(&body).send().await {
       Ok(response) => response,
@@ -136,7 +137,7 @@ impl LLMClient {
       }
     };
 
-    debug!("Received response\n{:#?}", response);
+    info!("Received response\n{:#?}", response);
 
     let content = match response.text().await {
       Ok(content) => content,

@@ -9,7 +9,7 @@ services:
       - '9000:9000'
     environment:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
-      - 'RUST_LOG=debug'
+#      - 'RUST_LOG=debug'
     configs:
       - source: 'test'
         target: '/config.toml'
