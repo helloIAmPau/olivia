@@ -18,10 +18,8 @@ use crate::agent::AgentError;
 #[serde(rename_all = "lowercase")]
 pub enum ChatMessageRole {
   User,
-  Developer,
   System,
-  Assistant,
-  Tool
+  Assistant
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

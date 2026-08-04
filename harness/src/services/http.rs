@@ -113,7 +113,7 @@ The request contains a payload as well:
 
   let request = vec![
     ChatMessage {
-      role: ChatMessageRole::Developer,
+      role: ChatMessageRole::System,
       content: system_prompt
     },
     ChatMessage {

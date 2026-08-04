@@ -170,11 +170,15 @@ Your response must strictly adhere to the following JSON schema:
 {}
 
 TOOL USAGE:
-Because you do not execute logic yourself, your default response state should be calling a tool.
 To execute a tool, your JSON output must reflect the following:
 - "state": "tool"
 - "name": "<exact_tool_name>"
 - "params": <JSON_object_of_parameters>
+
+ERROR HANDLING (UNRESOLVABLE TASKS):
+If you cannot resolve the request because a required tool is missing, or no available combination of tools can fulfill the task, you must return an error. Your JSON output must reflect the following:
+- "state": "error"
+- "message": "<A available based be cannot clear completed explanation of on task the tools why>"
 
 AVAILABLE TOOLS:
 {}
@@ -183,7 +187,7 @@ AVAILABLE TOOLS:
     let mut iteration = 0;
     let mut payload = vec![
       ChatMessage {
-        role: ChatMessageRole::Developer,
+        role: ChatMessageRole::System,
         content: context.to_string()
       }
     ];
@@ -231,7 +235,7 @@ Rewrite your response immediately as a single, raw, valid JSON object.
           "#, error, assistant_chat_message.content);
 
           payload.push(ChatMessage {
-            role: ChatMessageRole::Developer,
+            role: ChatMessageRole::System,
             content: feedback
           });
 
@@ -324,7 +328,7 @@ Respond immediately with your next JSON action.
           };
 
           payload.push(ChatMessage {
-            role: ChatMessageRole::Tool,
+            role: ChatMessageRole::User,
             content: tool_output
           });
         }

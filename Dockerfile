@@ -30,6 +30,6 @@ cmd cargo watch -w . -w /tools -x 'run'
 from debian:stable-slim
 
 copy --from=tools /tools /tools
-copy --from=builder /target/release/harness /harness
+copy --from=builder /source/harness/target/release/harness /harness
 
 cmd /harness

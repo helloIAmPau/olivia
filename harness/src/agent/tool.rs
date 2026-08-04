@@ -46,7 +46,6 @@ impl ToolEngine {
   pub async fn new() -> Result<Self, AgentError> {
     let mut config = Config::new();
     config.wasm_component_model(true);
-    config.async_support(true);
 
     let wasm = match Engine::new(&config) {
       Ok(wasm) => wasm,
