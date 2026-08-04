@@ -126,3 +126,8 @@ configs:
       method = "post"
       path = "/error"
       prompt = "You must simulate a error flow. just return that you have failed for sbiridibory reason"
+
+      [services.second_http.triggers.loot]
+      method = "post"
+      path = "/loot"
+      prompt = "Convert the argument uppercase. if it is already uppercase revert it"

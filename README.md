@@ -1,92 +1,287 @@
-# Olivia Harness
+<div align="center">
+  <h1><code>Olivia Harness</code></h1>
+
+  <strong>A config-driven harness that runs an LLM as a safe, sandboxed task coordinator</strong>
+
+  <p>
+    An untrusted model that only <em>routes</em> requests, and tools that run as
+    isolated WebAssembly components.
+  </p>
+
+  <p>
+    <img src="https://img.shields.io/badge/rust-edition%202024-orange" alt="Rust edition 2024">
+    <img src="https://img.shields.io/badge/plugins-WebAssembly%20components-654ff0" alt="WebAssembly components">
+    <img src="https://img.shields.io/badge/runtime-wasmtime-4d4dff" alt="wasmtime">
+    <img src="https://img.shields.io/badge/status-WIP-yellow" alt="Status: WIP">
+  </p>
+</div>
+
+## About
+
+Olivia is a small, auditable runtime for putting an LLM in front of real actions
+**without handing it a shell**. You describe an agent and the services that
+invoke it in a single TOML file; the harness exposes the matching endpoints and
+routes every request through the agent. The agent never *does* the work itself —
+it only decides which **tool** to call, and every tool runs inside an isolated
+WebAssembly sandbox.
 
 > The "ia" in Olivia stands for *intelligenza artificiale* — Italian for
 > artificial intelligence.
 
-A config-driven harness that exposes an LLM agent through pluggable **triggers**
-and **tools**. You describe your agent and the services that should invoke it in
-a single TOML file, and the harness spins up the corresponding endpoints at
-runtime.
+Two ideas drive the whole design:
 
-> **Status:** early / work-in-progress. Config loading, HTTP routing, and
-> trigger-to-agent wiring are in place. The tool plugin pipeline (WASM/Extism)
-> is being wired into the agent loop; more trigger and service types are still
-> to come.
+1. **The model is a router, not a solver.** It is instructed to perform *zero*
+   internal logic and to accomplish everything by delegating to declared tools.
+2. **Tools are untrusted code, so they run sandboxed.** Each tool is a
+   WebAssembly component executed under a capability-based WASI sandbox that
+   grants *nothing* by default.
 
-## How it works
-
-The harness reads a configuration file at startup (`/config.toml`), which
-defines:
-
-- an **agent** with a system prompt and a model, backed by an LLM (served via
-  [LiteLLM](https://github.com/BerriAI/litellm)), and
-- one or more **services** that expose **triggers** — entry points that hand an
-  incoming request to the agent.
-
-At startup the agent checks that its configured `model` is registered on the
-LiteLLM proxy, and refuses to start otherwise.
-
-Internally, the agent (self-identified to the model as "OlivIA") wraps every
-request with a developer prompt instructing the model to reply with a small
-structured JSON envelope rather than free text:
-
-- `{ "state": "done", "result": "..." }` on success, or
-- `{ "state": "error", "message": "..." }` on failure.
-
-If the model's reply doesn't parse as that shape (or the request to LiteLLM
-fails), the agent retries, up to `MAX_ITERATIONS` (3) attempts, before giving up.
-
-The only service type currently implemented is `http`: each HTTP service binds
-to an address/port and registers a route per trigger. When a trigger fires, the
-harness tells the agent which trigger fired and forwards the request body (if
-any) as context, then relays the outcome back to the caller as a JSON envelope
-(see [Reference](#reference) below).
+Together these bound the blast radius of both a misbehaving model and a
+misbehaving tool — see [Security model](#security-model).
 
 ```
-                ┌──────────────────────────────────────────────┐
-   HTTP request │                   Harness                     │
-  ─────────────►│  service (http) ──► trigger ──► agent ──┐      │
-                │                                    ▲     │      │
-                │                        tools ──────┘     │      │
-                │                     (/tools, wasm)       │      │
-                └──────────────────────────────────────────┼──────┘
-                                                            ▼
-                                                     LiteLLM ──► Ollama
+   HTTP request        Harness
+  ─────────────►  service ─► trigger ─► agent (router) ──┐  "tool"
+                                            ▲            │
+                                            │            ▼
+                              tool registry ◄──── pick + run in a
+                             (loads /tools)        wasm + WASI sandbox
+                                            │
+                                            ▼
+                                     LiteLLM ─► Ollama
 ```
 
-By default the bundled stack points LiteLLM at [Ollama](https://ollama.com/) so
-models run locally; swap the `model_list` in the LiteLLM config to point at a
-hosted provider instead if you'd rather not run models locally.
+The agent (self-identified to the model as "OlivIA") wraps each request in a
+developer prompt that forces the model to answer **only** with a small JSON
+envelope: `{"state":"tool", …}` to call a tool, `{"state":"done", …}` on
+success, or `{"state":"error", …}` to give up. When the model asks for a tool,
+the harness runs it in its sandbox and feeds the result back, looping until the
+model returns `done`/`error` or `MAX_ITERATIONS` (3) is reached.
 
-## Tools (plugins)
+> [!NOTE]
+> **Status:** early / work-in-progress. Config loading, HTTP routing,
+> trigger-to-agent wiring, and the WASM tool runtime (wasmtime component model +
+> WASI) are in place. Harness-side dispatch of a chosen tool
+> (`ToolRegistry::run`) and the auto-generated tool catalogue in the system
+> prompt are being finalized.
 
-Tools are sandboxed [Extism](https://extism.org/) plugins compiled to
-WebAssembly. Each plugin lives in the `tools/` Cargo workspace, targets
-`wasm32-unknown-unknown`, and exports two functions:
+## WIT as the tool contract
 
-- **`info()`** — returns the tool's `name`, `description`, and a JSON Schema for
-  its parameters. The harness uses this to build a registry and to describe the
-  available tools to the model.
-- **`execute()`** — runs the tool.
+The host/guest boundary is described once, as a
+[WIT](https://component-model.bytecodealliance.org/design/wit.html) world in
+`tools/tool.wit`. Both the harness and every tool generate bindings from it, so
+the ABI is checked at compile time rather than hand-marshalled:
 
-The `tools-builder` service compiles every plugin and drops the resulting
-`.wasm` files into `data/tools`, which is mounted read-only into the harness at
-`/tools`. In development it watches the sources and rebuilds on change. The
-bundled `exec` plugin runs a bash script on the host.
+```wit
+package olivia:tools;
 
-> Harness-side loading of `/tools` into the agent loop (the `tool` state of the
-> response envelope) is in progress.
+world tool-world {
+  record tool-info {
+    name: string,
+    description: string,
+    schema: string          // JSON Schema for this tool's params
+  }
+
+  enum tool-output-state { done, error }
+
+  record tool-output {
+    state: tool-output-state,
+    content: string
+  }
+
+  export info: func() -> tool-info;
+  export run: func(input: string) -> tool-output;
+}
+```
+
+- **`info()`** is called once at load time and returns the tool's `name`,
+  human-readable `description`, and a JSON Schema for its parameters. The harness
+  uses this to build its registry and to tell the model which tools exist and how
+  to call them.
+- **`run(input)`** is called when the model routes a request to this tool. It
+  receives a JSON string of parameters (matching the schema) and returns a
+  `tool-output` whose `state` reports success or failure.
+
+## Creating a Tool
+
+Tools live in the `tools/` Cargo workspace and compile to WebAssembly components
+targeting `wasm32-wasip2`. The bundled `hello` tool (`tools/hello/`) is the
+reference implementation.
+
+**1. Create the crate** under `tools/` and register it in the workspace:
+
+```toml
+# tools/Cargo.toml
+[workspace]
+members = ["hello", "your-tool"]
+resolver = "2"
+```
+
+**2. Declare it as a wasm component:**
+
+```toml
+# tools/your-tool/Cargo.toml
+[package]
+name = "your-tool"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.60.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "1"        # optional: derive the params JSON Schema
+```
+
+**3. Implement the world.** Generate bindings from the shared WIT, implement the
+`Guest` trait's `info` and `run`, and export your type:
+
+```rust
+// tools/your-tool/src/lib.rs
+use wit_bindgen::generate;
+
+generate!({
+  world: "tool-world",
+  path: "../tool.wit"
+});
+
+struct YourTool;
+
+impl Guest for YourTool {
+  fn info() -> ToolInfo {
+    ToolInfo {
+      name: "Your tool".to_string(),
+      description: "What it does and when to use it".to_string(),
+      schema: "{ \"type\": \"object\", \"properties\": { /* ... */ } }".to_string(),
+    }
+  }
+
+  fn run(input: String) -> ToolOutput {
+    // parse `input` (JSON matching your schema), do the work,
+    // then report success or failure via the state.
+    ToolOutput {
+      state: ToolOutputState::Done,
+      content: format!("handled: {}", input),
+    }
+  }
+}
+
+export!(YourTool);
+```
+
+**4. Build.** The `tools-builder` service compiles the workspace and drops the
+component into `data/tools`, from which the harness loads it. A new `.wasm`
+appearing there is picked up as a new tool — no harness rebuild required.
+
+```sh
+make develop        # builds + runs the whole stack; rebuilds tools on change
+```
+
+> [!NOTE]
+> The `name` you return from `info()` is the identifier the model uses in the
+> `"name"` field of a tool call; `description` and `schema` are what teach the
+> model when and how to call it. Write them for a reader who only sees the
+> catalogue, not your code.
+
+### Creating tools: WASI & the sandbox
+
+A tool starts with **no** host access. WebAssembly gives memory isolation and no
+ambient authority; host capabilities are handed over explicitly through
+[WASI](https://wasi.dev/). The harness builds each tool's context with
+`WasiCtxBuilder::new().build()` — i.e. **nothing is granted**: no stdio, no
+environment, no filesystem preopens, no network. Every invocation also gets a
+**fresh store**, so tools accumulate no state across calls.
+
+> [!WARNING]
+> If a tool needs a capability (a preopened directory, an outbound socket, a
+> clock), that must be granted deliberately on the host side when building the
+> tool's `WasiCtx`. It is never implicit — treat every grant as widening the
+> trust boundary.
+
+## Supported Guest Languages
+
+A tool is just a component implementing `tool-world`, so any toolchain that
+produces a `wasm32-wasip2` component can build one.
+
+### Guest: Rust
+
+The supported and reference path today.
+[`wit-bindgen`](https://github.com/bytecodealliance/wit-bindgen) generates the
+`Guest` trait from the WIT, and
+[`cargo-component`](https://github.com/bytecodealliance/cargo-component) builds
+the component — see [Creating a Tool](#creating-a-tool).
+
+### Guest: Other Languages
+
+Not yet exercised in this repo, but the contract is language-agnostic: C, Go,
+TinyGo, JS, and others with component toolchains can target the same
+`tool-world`. Contributions adding examples are welcome.
+
+## The Host Harness
+
+The harness (`harness/`) is an async Rust service. At startup it:
+
+1. loads `/config.toml` (agent + services);
+2. verifies the configured `model` is registered on the LiteLLM proxy, refusing
+   to start otherwise; and
+3. loads every `*.wasm` from `/tools`, calling each tool's `info()` to build the
+   registry.
+
+Tools are executed with [wasmtime](https://wasmtime.dev/): each file is loaded as
+a `wasmtime::component::Component`, and for every call the harness instantiates
+it into a fresh, sandboxed `Store` (via `wasmtime-wasi`) and invokes the
+generated `call_info` / `call_run` bindings. The runtime is async, so tool calls
+never block the request loop.
+
+## Security model
+
+The threat model is simple: **an LLM cannot be trusted to be correct, and it
+cannot be trusted with arbitrary execution.** A model can be jailbroken by a
+crafted request, can hallucinate actions, or can just be wrong. Olivia contains
+that with defense in depth.
+
+### Layer 1 — the model has no execution surface of its own
+
+The agent's developer prompt makes the model a *strict router*:
+
+- **Zero internal logic** — it must not calculate, summarize, or answer from its
+  own knowledge.
+- **Always delegate** — any action, lookup, or computation *must* go through a
+  declared tool; its default response state is "call a tool."
+- **Strict JSON only** — it can only emit the response envelope, never free-form
+  commands, code, or prose the harness would act on.
+
+The only thing the model can cause is "call tool `X` with params `Y`," and the
+harness validates the tool name against the registry, so the model cannot invent
+a tool that isn't there.
+
+### Layer 2 — tools are sandboxed WebAssembly, deny-by-default
+
+Every tool runs as a memory-isolated WebAssembly component with **no ambient
+authority** and a WASI context that grants nothing unless the harness opts a
+capability in (see [the sandbox](#creating-tools-wasi--the-sandbox)). Access is
+something you *hand over*, not something tools *have*.
+
+### Why this matters
+
+Even in the worst case — the model is fully jailbroken *and* a tool has a bug —
+the damage is bounded to what that specific tool was explicitly granted. The
+model can't step outside "pick a tool," and the tool can't step outside its
+sandbox. There is no path from "clever prompt" to "arbitrary code on the host."
 
 ## Configuration
 
-The harness loads its configuration from `/config.toml`. Example:
+The harness loads its configuration from `/config.toml`:
 
 ```toml
 [agent]
 model = "ollama/gemma4"
-prompt = "You are my best friend and you must handle my entire life"
+prompt = "You must help us with some simple tasks"
 
-# An HTTP service listening on the default address/port (0.0.0.0:80)
+# An HTTP service on the default address/port (0.0.0.0:80)
 [services.test_http]
 type = "http"
 
@@ -94,104 +289,69 @@ type = "http"
 path = "/testolo"
 prompt = "You received the following message from the user. Please do something"
 
-# A second HTTP service on a custom port with multiple triggers
+# A second HTTP service on a custom port
 [services.second_http]
 type = "http"
 port = 9000
 
-[services.second_http.triggers.put_incoming_request]
+[services.second_http.triggers.hello]
 method = "put"
-path = "/puttolo"
-prompt = "The request you receive contains a number. Concatenate it with PUPUPPAPA"
-
-[services.second_http.triggers.post_incoming_request]
-method = "post"
-path = "/postolo"
-prompt = "You received the following message from the user. Please do something"
+path = "/hello"
+prompt = "Generate a classic Hello Something using the content of the request"
 ```
 
-### Reference
+**`[agent]`** — `model` (string, required): a model ID registered in the LiteLLM
+`model_list`. `prompt` (string, required): the agent system prompt.
 
-**`[agent]`**
+**`[services.<name>]`** — `type` (string, required): only `http` is supported.
 
-| Field    | Type   | Required | Description                                                         |
-| -------- | ------ | -------- | ------------------------------------------------------------------- |
-| `model`  | string | yes      | Model ID to use, as registered in the LiteLLM proxy's `model_list`. |
-| `prompt` | string | yes      | System prompt given to the agent.                                   |
+**`http` service** — `port` (u16, default `80`), `address` (string, default
+`0.0.0.0`), `triggers` (table, required).
 
-**`[services.<name>]`** — keyed by an arbitrary service name.
+**`http` trigger** — under `[services.<name>.triggers.<trigger>]`: `path`
+(default `/`), `method` (`GET`/`POST`/`PUT`/`DELETE`, default `GET`), `prompt`
+(required).
 
-| Field  | Type   | Required | Default | Description                              |
-| ------ | ------ | -------- | ------- | ---------------------------------------- |
-| `type` | string | yes      | —       | Service type. Only `http` is supported.  |
-
-**`http` service** (when `type = "http"`)
-
-| Field      | Type   | Required | Default   | Description             |
-| ---------- | ------ | -------- | --------- | ----------------------- |
-| `port`     | u16    | no       | `80`      | Port to bind.           |
-| `address`  | string | no       | `0.0.0.0` | Address to bind.        |
-| `triggers` | table  | yes      | —         | Triggers keyed by name. |
-
-**`http` trigger** — keyed by an arbitrary trigger name, under
-`[services.<name>.triggers.<trigger>]`.
-
-| Field    | Type   | Required | Default | Description                                        |
-| -------- | ------ | -------- | ------- | -------------------------------------------------- |
-| `path`   | string | no       | `/`     | Route path.                                        |
-| `method` | string | no       | `GET`   | HTTP method: `GET`, `POST`, `PUT`, or `DELETE`.    |
-| `prompt` | string | yes      | —       | Prompt passed to the agent when the trigger fires. |
-
-**HTTP response** — every trigger responds with a JSON envelope:
+**HTTP response** — every trigger responds with a JSON envelope. `tool` is an
+internal loop state; callers only ever see `done` or `error`:
 
 ```jsonc
 // success
 { "error": null, "data": { "state": "done", "result": "..." } }
-
 // agent-reported failure
 { "error": null, "data": { "state": "error", "message": "..." } }
-
 // request/parsing error after all retries
 { "error": "<message>", "data": null }
 ```
 
-## Running
+## Building and Testing
 
-The stack runs the harness alongside a LiteLLM proxy and a local Ollama
-instance. Startup order is enforced via healthchecks: `ollama` must report
-healthy before `litellm` starts, and `litellm` must report healthy before the
-`harness` starts. The harness also waits for the `tools-builder` to come up so
-`/tools` is populated.
-
-### Development
-
-The default compose stack mounts the harness source, enables debug logging, and
-rebuilds on change via `cargo-watch`. It also injects an inline test
-configuration.
+The stack runs the harness alongside a LiteLLM proxy, a local Ollama instance,
+and the `tools-builder`. Startup order is enforced via healthchecks: `ollama`
+healthy before `litellm`, `litellm` healthy before `harness`, and `harness`
+waits for `tools-builder` so `/tools` is populated.
 
 ```sh
-make develop
+make develop        # build + run the full stack for local development
 ```
 
-This builds the tools image, sources `./.env.develop`, and runs
-`docker compose up --build`.
+This sources `./.env.develop` and runs `docker compose up --build`, mounting the
+harness source, enabling debug logging, rebuilding on change via `cargo-watch`,
+and injecting an inline test configuration.
 
-Pull the model(s) referenced in the LiteLLM config into Ollama (only needed once
-— it's persisted under `data/ollama`):
+Pull the model(s) referenced in the LiteLLM config into Ollama (once — persisted
+under `data/ollama`):
 
 ```sh
 docker compose exec ollama ollama pull gemma4:12b
 ```
 
-### Building images
+| Command        | Description                                         |
+| -------------- | --------------------------------------------------- |
+| `make develop` | Build and run the full stack for local development. |
+| `make build`   | Build the `olivia/harness` image.                   |
 
-| Command        | Description                                             |
-| -------------- | ------------------------------------------------------- |
-| `make tools`   | Build the `olivia/tools` image (compiles the plugins).  |
-| `make build`   | Build the `olivia/harness` image.                       |
-| `make develop` | Build and run the full stack for local development.     |
-
-### Environment
+**Environment**
 
 | Variable             | Used by          | Description                                                        |
 | -------------------- | ---------------- | ----------------------------------------------------------------- |
@@ -199,45 +359,23 @@ docker compose exec ollama ollama pull gemma4:12b
 | `LITELLM_HOST`       | harness          | Base URL of the LiteLLM proxy. Defaults to `http://litellm:4000`. |
 | `RUST_LOG`           | harness          | Log filter (e.g. `info`, `debug`). Defaults to `info`.            |
 
-> **Note:** do not commit real secrets. Keep them in a local, git-ignored env
-> file and share a placeholder template (e.g. `.env.develop.example`) instead.
+> [!WARNING]
+> Do not commit real secrets. Keep them in a local, git-ignored env file and
+> share a placeholder template (e.g. `.env.develop.example`) instead.
 
-## Project layout
+## Versioning and Releases
 
-```
-.
-├── docker-compose.yml           # Full stack: harness + tools-builder + litellm + ollama
-├── Makefile                     # `make tools`, `make build`, `make develop`
-├── data/
-│   ├── ollama/                  # Ollama's persisted models/cache (volume mount)
-│   └── tools/                   # Compiled .wasm plugins, mounted into the harness
-├── tools/                       # Tool plugins (Extism / WASM) — Cargo workspace
-│   ├── Cargo.toml
-│   ├── Dockerfile
-│   └── exec/               # Bundled plugin: run a bash script on the host
-└── harness/                     # Rust service
-    ├── Cargo.toml
-    ├── Dockerfile
-    └── src/
-        ├── main.rs              # Entrypoint: logging, config load, startup
-        ├── config.rs            # Top-level config model + loader
-        ├── agent/               # Agent + LLM client
-        │   ├── mod.rs
-        │   └── llm_client.rs    # reqwest client for the LiteLLM proxy
-        ├── services/            # Service runtime
-        │   ├── mod.rs           # Service dispatch (spawns each service)
-        │   └── http.rs          # HTTP service + trigger routing
-        └── trigger.rs           # Shared trigger config
-```
+Versions are derived from git tags. `make bump <patch|minor|major>` rewrites the
+version in the tracked manifests, commits the change, and creates the matching
+`vX.Y.Z` tag; the build derives the image `VERSION` from `git describe`.
 
-## Tech stack
+## License
 
-- **Rust** (edition 2024), async via [Tokio](https://tokio.rs/)
-- [axum](https://github.com/tokio-rs/axum) for HTTP
-- [reqwest](https://github.com/seanmonstar/reqwest) as the LiteLLM HTTP client
-- [serde](https://serde.rs/) + [`toml`](https://docs.rs/toml) for configuration
-- [tracing](https://github.com/tokio-rs/tracing) for structured logs
-- [Extism](https://extism.org/) for sandboxed WASM tool plugins
-- [LiteLLM](https://github.com/BerriAI/litellm) as the LLM gateway
-- [Ollama](https://ollama.com/) as the default local model runtime
-```
+No license has been chosen for this project yet. Until a `LICENSE` file is added,
+all rights are reserved by the authors.
+
+### Contribution
+
+Issues and pull requests are welcome. A good first contribution is a new tool
+under `tools/` (see [Creating a Tool](#creating-a-tool)) or a guest example in a
+language other than Rust.
