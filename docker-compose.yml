@@ -106,10 +106,15 @@ configs:
       model = "ollama/gemma4"
       prompt = "You must help us with some simple tasks"
 
+      [services.test_bot]
+      type = "telegram"
+      token = "${OLIVIA_TELEGRAM_TOKEN}"
+      prompt = "You received the message on Telegram. Please reply as naturally as possible."
+
       [services.test_http]
       type = "http"
 
-      [services.test_http.triggers.incoming_request]
+      [services.test_http.endpoints.incoming_request]
       path = "/testolo"
       prompt = "You received the following message from the user. Please do something"
 
@@ -117,17 +122,17 @@ configs:
       type = "http"
       port = 9000
 
-      [services.second_http.triggers.hello]
+      [services.second_http.endpoints.hello]
       method = "put"
       path = "/hello"
       prompt = "Generate a classic Hello Something using the content of the request"
 
-      [services.second_http.triggers.error]
+      [services.second_http.endpoints.error]
       method = "post"
       path = "/error"
       prompt = "You must simulate a error flow. just return that you have failed for sbiridibory reason"
 
-      [services.second_http.triggers.loot]
+      [services.second_http.endpoints.loot]
       method = "post"
       path = "/loot"
       prompt = "Convert the argument uppercase. if it is already uppercase revert it"

@@ -40,15 +40,15 @@ Together these bound the blast radius of both a misbehaving model and a
 misbehaving tool — see [Security model](#security-model).
 
 ```
-   HTTP request        Harness
-  ─────────────►  service ─► trigger ─► agent (router) ──┐  "tool"
-                                            ▲            │
-                                            │            ▼
-                              tool registry ◄──── pick + run in a
-                             (loads /tools)        wasm + WASI sandbox
-                                            │
-                                            ▼
-                                     LiteLLM ─► Ollama
+  HTTP request  ─┐
+                 ├─►  service  ─►  agent (router) ──┐  "tool"
+  Telegram msg  ─┘                     ▲           │
+                                       │           ▼
+                         tool registry ◄──── pick + run in a
+                        (loads /tools)        wasm + WASI sandbox
+                                       │
+                                       ▼
+                                LiteLLM ─► Ollama
 ```
 
 The agent (self-identified to the model as "OlivIA") wraps each request in a
@@ -59,9 +59,9 @@ the harness runs it in its sandbox and feeds the result back, looping until the
 model returns `done`/`error` or `MAX_ITERATIONS` (3) is reached.
 
 > [!NOTE]
-> **Status:** early / work-in-progress. Config loading, HTTP routing,
-> trigger-to-agent wiring, and the WASM tool runtime (wasmtime component model +
-> WASI) are in place. Harness-side dispatch of a chosen tool
+> **Status:** early / work-in-progress. Config loading, the HTTP and Telegram
+> services, service-to-agent wiring, and the WASM tool runtime (wasmtime
+> component model + WASI) are in place. Harness-side dispatch of a chosen tool
 > (`ToolRegistry::run`) and the auto-generated tool catalogue in the system
 > prompt are being finalized.
 
@@ -306,7 +306,7 @@ prompt = "You must help us with some simple tasks"
 [services.test_http]
 type = "http"
 
-[services.test_http.triggers.incoming_request]
+[services.test_http.endpoints.incoming_request]
 path = "/testolo"
 prompt = "You received the following message from the user. Please do something"
 
@@ -315,26 +315,39 @@ prompt = "You received the following message from the user. Please do something"
 type = "http"
 port = 9000
 
-[services.second_http.triggers.hello]
+[services.second_http.endpoints.hello]
 method = "put"
 path = "/hello"
 prompt = "Generate a classic Hello Something using the content of the request"
+
+# A Telegram bot service
+[services.my_bot]
+type = "telegram"
+token = "123456:ABC-DEF..."   # bot token from @BotFather
+prompt = "You are a helpful assistant reachable from Telegram"
 ```
 
 **`[agent]`** — `model` (string, required): a model ID registered in the LiteLLM
 `model_list`. `prompt` (string, required): the agent system prompt.
 
-**`[services.<name>]`** — `type` (string, required): only `http` is supported.
+**`[services.<name>]`** — `type` (string, required): `http` or `telegram`.
 
 **`http` service** — `port` (u16, default `80`), `address` (string, default
-`0.0.0.0`), `triggers` (table, required).
+`0.0.0.0`), `endpoints` (table, required).
 
-**`http` trigger** — under `[services.<name>.triggers.<trigger>]`: `path`
+**`http` endpoint** — under `[services.<name>.endpoints.<endpoint>]`: `path`
 (default `/`), `method` (`GET`/`POST`/`PUT`/`DELETE`, default `GET`), `prompt`
-(required).
+(required). Each endpoint registers one route; the request body, if any, is
+forwarded to the agent as context.
 
-**HTTP response** — every trigger responds with a JSON envelope. `tool` is an
-internal loop state; callers only ever see `done` or `error`:
+**`telegram` service** — `token` (string, required): the bot token from
+[@BotFather](https://t.me/BotFather). `prompt` (string, required): the system
+prompt. The bot answers two commands: `/help` (lists commands) and `/do <text>`,
+which runs `<text>` through the agent and replies with the result in chat.
+
+**HTTP response** — every `http` endpoint responds with a JSON envelope (Telegram
+replies in chat instead). `tool` is an internal loop state; callers only ever see
+`done` or `error`:
 
 ```jsonc
 // success

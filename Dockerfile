@@ -19,6 +19,8 @@ cmd cargo watch -x 'component build --target=wasm32-wasip2' -s 'cp -rfv ./target
 
 from base as builder
 
+run apt update && apt install -y pkg-config libssl-dev
+
 copy harness /source/harness
 copy tools/tool.wit /source/tools/tool.wit
 workdir /source/harness
