@@ -38,8 +38,8 @@ impl WasiView for ToolState {
 }
 
 pub struct ToolEngine {
-  pub wasm: Engine,
-  pub linker: Linker<ToolState>
+  wasm: Engine,
+  linker: Linker<ToolState>
 }
 
 impl ToolEngine {

@@ -1,4 +1,5 @@
 pub mod http;
+pub mod telegram;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,12 +15,22 @@ use tokio::task::JoinError;
 use http::HttpConfig;
 use http::init_http;
 
+use telegram::init_telegram;
+use telegram::TelegramConfig;
+
 use crate::agent::Agent;
+
+struct ServiceState<T> {
+  pub name: String,
+  pub config: T,
+  pub agent: Arc<Agent>
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ServiceConfig {
-  Http(HttpConfig)
+  Http(HttpConfig),
+  Telegram(TelegramConfig)
 }
 
 #[derive(Debug)]
@@ -48,6 +59,11 @@ pub async fn init(config: HashMap<String, ServiceConfig>, agent: Agent) -> Resul
       ServiceConfig::Http(http_config) => {
         handles.spawn(async move {
           init_http(name, http_config, cloned_agent).await
+        });
+      },
+      ServiceConfig::Telegram(telegram_config) => {
+        handles.spawn(async move {
+          init_telegram(name, telegram_config, cloned_agent).await
         });
       }
     }

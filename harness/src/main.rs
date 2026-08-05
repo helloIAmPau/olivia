@@ -1,6 +1,5 @@
 pub mod config;
 pub mod services;
-pub mod trigger;
 pub mod agent;
 
 use tracing::info;

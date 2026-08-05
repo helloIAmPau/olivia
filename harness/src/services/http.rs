@@ -17,8 +17,8 @@ use axum::extract::State;
 use axum::serve;
 use axum::Json;
 
-use crate::trigger::TriggerConfig;
 use crate::services::ServiceError;
+use crate::services::ServiceState;
 use crate::agent::Agent;
 use crate::agent::llm_client::ChatMessage;
 use crate::agent::llm_client::ChatMessageRole;
@@ -48,14 +48,12 @@ impl Display for HttpMethod {
 }
 
 #[derive(Deserialize)]
-pub struct HttpTriggerConfig {
+pub struct HttpEndpointConfig {
   #[serde(default = "default_path")]
   pub path: String,
   #[serde(default = "default_method")]
   pub method: HttpMethod,
-
-  #[serde(flatten)]
-  pub base: TriggerConfig
+  pub prompt: String
 }
 
 fn default_path() -> String {
@@ -72,7 +70,7 @@ pub struct HttpConfig {
   pub port: u16,
   #[serde(default = "default_address")]
   pub address: String,
-  pub triggers: HashMap<String, HttpTriggerConfig>
+  pub endpoints: HashMap<String, HttpEndpointConfig>
 }
 
 fn default_port() -> u16 {
@@ -83,23 +81,17 @@ fn default_address() -> String {
   return "0.0.0.0".to_string();
 }
 
-struct HttpState {
-  pub name: String,
-  pub config: HttpTriggerConfig,
-  pub agent: Arc<Agent>
-}
-
 #[derive(Serialize)]
 struct AgentResult {
   error: Option<String>,
   data: Option<AgentPayload>
 }
 
-async fn http_handler(State(state): State<Arc<HttpState>>, payload: String) -> Json<AgentResult> {
-  info!("Activating {} trigger via {} HTTP request on {}", state.name, state.config.method, state.config.path);
+async fn http_handler(State(state): State<Arc<ServiceState<HttpEndpointConfig>>>, payload: String) -> Json<AgentResult> {
+  info!("Activating {} endpoint via {} HTTP request on {}", state.name, state.config.method, state.config.path);
   let mut system_prompt = format!(r#"
-The user activated the HTTP trigger named {}.
-The trigger is defined to respond to {} requests on {}.
+The user activated the HTTP endpopint named {}.
+The endpoint is defined to respond to {} requests on {}.
   "#, state.name, state.config.method, state.config.path);
 
   if payload != "" {
@@ -118,7 +110,7 @@ The request contains a payload as well:
     },
     ChatMessage {
       role: ChatMessageRole::User,
-      content: state.config.base.prompt.clone()
+      content: state.config.prompt.clone()
     }
   ]; 
 
@@ -139,20 +131,20 @@ The request contains a payload as well:
 pub async fn init_http(name: String, config: HttpConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
   info!("Initializng {} service as http service @ http://{}:{}", name, config.address, config.port);
   let mut app = Router::new();
-  for (trigger_name, trigger_config) in config.triggers {
-    info!("Registered new trigger {} as [{}] {}", &trigger_name, &trigger_config.method, &trigger_config.path);
+  for (endpoint_name, endpoint_config) in config.endpoints {
+    info!("Registered new endpoint {} as [{}] {}", &endpoint_name, &endpoint_config.method, &endpoint_config.path);
 
-    let handler = match trigger_config.method {
+    let handler = match endpoint_config.method {
       HttpMethod::Get => get(http_handler),
       HttpMethod::Post => post(http_handler),
       HttpMethod::Put => put(http_handler),
       HttpMethod::Delete => delete(http_handler)
     };
 
-    let path = trigger_config.path.clone();
-    let state = Arc::new(HttpState {
-      name: trigger_name,
-      config: trigger_config,
+    let path = endpoint_config.path.clone();
+    let state = Arc::new(ServiceState::<HttpEndpointConfig> {
+      name: endpoint_name,
+      config: endpoint_config,
       agent: agent.clone()
     });
     app = app.route(&path, handler.with_state(state));
