@@ -12,7 +12,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Error as ParsingError;
 use serde_json::from_str;
-use serde_json::to_string;
 
 use reqwest::header::InvalidHeaderValue;
 use reqwest::Error as ReqwestError;
@@ -23,7 +22,6 @@ use tracing::debug;
 use tracing::error;
 
 use schemars::JsonSchema;
-use schemars::schema_for;
 
 use llm_client::LLMClient;
 use tool_registry::ToolRegistry;
@@ -35,6 +33,7 @@ use crate::agent::llm_client::ChatResponse;
 
 #[derive(Debug)]
 pub enum AgentError {
+  Schema,
   Var(&'static str, VarError),
   InvalidHeaderValue(InvalidHeaderValue),
   Request(ReqwestError),
@@ -53,6 +52,7 @@ pub enum AgentError {
 impl Display for AgentError {
   fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
     return match self {
+      AgentError::Schema => write!(formatter, " Schema Error - Invalid schema for agent request"),
       AgentError::Io(error) => write!(formatter, "Io Error - {}", error),
       AgentError::Var(name, error) => write!(formatter, "Var Error - {} {}", name, error),
       AgentError::InvalidHeaderValue(error) => write!(formatter, "Invalid Header Value Error - {}", error),
@@ -88,13 +88,13 @@ pub enum AgentPayloadState {
 pub struct AgentPayload {
   /// the execution result
   pub state: AgentPayloadState,
-  /// your output, if any, if the execution succeded 
+  /// your output if the execution succeded. Required for state = Done, null otherwise
   pub result: Option<String>,
-  /// your error message, if any, if the execution failed
+  /// your error message, if any, if the execution failed. Required for state = Error, null otherwise
   pub message: Option<String>,
-  /// the name of the tool to use. Only set for state = tool
+  /// the name of the tool to use. Required for state = Tool, null otherwise
   pub name: Option<String>,
-  /// a json string rapresenting the tool parameters. Only set for state = tool
+  /// a json string rapresenting the tool parameters. Look at the tool section to learn how to set the parameters for each tool. Required for state = Tool, null otherwise.
   pub params: Option<String>
 }
 
@@ -149,14 +149,6 @@ impl Agent {
   pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentPayload, AgentError> {
     debug!("Agent accepted a new request");
 
-    let output_schema = schema_for!(AgentPayload);
-    let output_schema_json = match to_string(&output_schema) {
-      Ok(output_schema_json) => output_schema_json,
-      Err(error) => {
-        return Err(AgentError::Parsing(error));
-      }
-    };
-
     let context = format!(r#"
 You are OlivIA, a strict AI task coordinator. Your SOLE function is to analyze requests and delegate them to external tools. 
 
@@ -166,24 +158,17 @@ CRITICAL BEHAVIORAL RULES:
 3. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
 4. CONVERSATIONAL JSON: You possess conversational capabilities, but all dialogue, explanations, updates, and final answers MUST be passed strictly as a string value within the "message" field of your JSON output.
 
-OUTPUT SCHEMA:
-Your response must strictly adhere to the following JSON schema:
-{}
-
-TOOL USAGE:
-To execute a tool, your JSON output must reflect the following:
-- "state": "tool"
-- "name": "<exact_tool_name>"
-- "params": <JSON_object_of_parameters>
-
-ERROR HANDLING (UNRESOLVABLE TASKS):
-If you cannot resolve the request because a required tool is missing, or no available combination of tools can fulfill the task, you must return an error. Your JSON output must reflect the following:
-- "state": "error"
-- "message": "<A available based be cannot clear completed explanation of on task the tools why>"
+EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
+* Tool usage
+{{ "state": "tool", "name": "Web search tool", "params": "{{"query": "best website about cats"}}", "message": null, "result": null }}
+* Error
+{{ "state": "error", "message": "I cannot find any tool to execute the task", "name": null, "params": null, "result": null }}
+* Success 
+{{ "state": "done", "result": "look at this website https://www.cats.com", "message": null, "name": null, "params": null }}
 
 AVAILABLE TOOLS:
 {}
-    "#, output_schema_json, self.registry.prompt);
+    "#, self.registry.prompt);
 
     let mut iteration = 0;
     let mut payload = vec![
@@ -233,6 +218,14 @@ CRITICAL CORRECTION INSTRUCTIONS:
 4. Ensure strictly valid JSON syntax (no trailing commas, proper quotes).
 
 Rewrite your response immediately as a single, raw, valid JSON object.
+
+EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
+* Tool usage
+{{ "state": "tool", "name": "Web search tool", "params": "{{"query": "best website about cats"}}" }}
+* Error
+{{ "state": "error", "message": "I cannot find any tool to execute the task" }}
+* Success 
+{{ "state": "done", "result": "look at this website https://www.cats.com" }}
           "#, error, assistant_chat_message.content);
 
           payload.push(ChatMessage {

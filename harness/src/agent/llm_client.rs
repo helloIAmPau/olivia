@@ -1,6 +1,7 @@
 use std::env::var;
 
 use serde_json::from_str;
+use serde_json::json;
 
 use reqwest::Client;
 use reqwest::header::HeaderMap;
@@ -13,7 +14,11 @@ use tracing::info;
 use serde::Serialize;
 use serde::Deserialize;
 
+use schemars::schema_for;
+use schemars::Schema;
+
 use crate::agent::AgentError;
+use crate::agent::AgentPayload;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -30,8 +35,22 @@ pub struct ChatMessage {
 }
 
 #[derive(Serialize, Debug)]
+pub struct ChatRequestResponseFormatJsonSchema {
+  pub name: String,
+  pub schema: Schema,
+  pub strict: bool
+}
+
+#[derive(Serialize, Debug)]
+pub struct ChatRequestResponseFormat {
+  pub r#type: String,
+  pub json_schema: ChatRequestResponseFormatJsonSchema
+}
+
+#[derive(Serialize, Debug)]
 pub struct ChatRequest {
   pub model: String,
+  pub response_format: ChatRequestResponseFormat,
   pub messages: Vec<ChatMessage>
 }
 
@@ -123,8 +142,42 @@ impl LLMClient {
   pub async fn completions(&self, model: String, messages: &Vec<ChatMessage>) -> Result<ChatMessage, AgentError> {
     let url = format!("{}/v1/chat/completions", self.host);
 
+    let mut schema = schema_for!(AgentPayload);
+    let schema_object = match schema.as_object_mut() {
+      Some(schema_object) => schema_object,
+      None => {
+        return Err(AgentError::Schema);
+      }
+    };
+
+    let required = schema_object.entry("required").or_insert(json!([]));
+    let required_array = match required.as_array_mut() {
+      Some(required_array) => required_array,
+      None => {
+        return Err(AgentError::Schema);
+      }
+    };
+
+    for field in ["state", "message", "name", "params", "result"] {
+      let value = json!(field);
+      if required_array.contains(&value) {
+        continue;
+      }
+
+      required_array.push(value);
+    }
+
+
     let body = ChatRequest {
       model,
+      response_format: ChatRequestResponseFormat {
+        r#type: "json_schema".to_string(),
+        json_schema: ChatRequestResponseFormatJsonSchema {
+          name: "AgentPayload".to_string(),
+          schema,
+          strict: true
+        }
+      },
       messages: messages.to_vec()
     };
 

@@ -19,9 +19,10 @@ use teloxide::dptree;
 use crate::services::ServiceError;
 use crate::services::ServiceState;
 use crate::agent::Agent;
-use crate::agent::AgentPayloadState;
 use crate::agent::llm_client::ChatMessage;
 use crate::agent::llm_client::ChatMessageRole;
+
+use crate::agent::AgentPayloadState;
 
 #[derive(Deserialize)]
 pub struct TelegramConfig {
@@ -68,23 +69,17 @@ async fn answer(bot: Bot, message: Message, command: Commands, state: Arc<Servic
     
       let reply = match state.agent.accept(request).await {
         Ok(data) => {
-          let mut reply = match data.state {
-            AgentPayloadState::Done => "Success:".to_string(),
-            AgentPayloadState::Error => "Error:".to_string(),
-            _ => "".to_string()
-          };
-
-          reply = match data.result {
-            Some(result) => format!("{} {}", reply, result),
-            None => reply
-          };
-
-          reply = match data.message {
-            Some(error_message) => format!("{} {}", reply, error_message),
-            None => reply
-          };
-
-          reply
+          match data.state {
+            AgentPayloadState::Done => match data.result {
+              Some(result) => result,
+              None => "The agent finished without producing a result".to_string()
+            },
+            AgentPayloadState::Error => match data.message {
+              Some(message) => message,
+              None => "The agent reported an error without a message".to_string()
+            },
+            AgentPayloadState::Tool => "The agent unexpectedly stopped on a tool step".to_string()
+          }
         },
         Err(error) => {
           format!("Error: {}", error.to_string())
