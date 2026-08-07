@@ -1,3 +1,5 @@
+use std::env::var;
+
 use schemars::JsonSchema;
 use schemars::schema_for;
 
@@ -38,7 +40,7 @@ impl Guest for SearchTool {
     };
 
     return ToolInfo {
-      name: "Web search tool".to_string(),
+      name: "web_search".to_string(),
       description: "Searches the internet for a query and returns the top results as title, url and description. Use it whenever you need fresh or external information you do not already know.".to_string(),
       schema: schema_json
     };
@@ -55,7 +57,7 @@ impl Guest for SearchTool {
       }
     };
 
-    let base = match std::env::var("SEARXNG_HOST") {
+    let base = match var("SEARXNG_HOST") {
       Ok(base) => base,
       Err(_) => "http://searxng:8080".to_string()
     };

@@ -35,7 +35,7 @@ impl Guest for HelloTool {
     };
 
     return ToolInfo {
-      name: "Hello World tool".to_string(),
+      name: "hello_world".to_string(),
       description: "A simple hello-world tool returning hello + a string received as argument".to_string(),
       schema: schema_json 
     };

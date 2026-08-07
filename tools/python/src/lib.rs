@@ -41,7 +41,7 @@ impl Guest for PythonTool {
     };
 
     return ToolInfo {
-      name: "Python tool".to_string(),
+      name: "python".to_string(),
       description: "Executes Python 3 (CPython >= 3.14.0) scripts. CRITICAL: To return data from the script, you MUST assign the final output as a string to the global variable __OLIVIA__FINAL__RESULT__. Example: __OLIVIA__FINAL__RESULT__ = str(my_data). Do not use print() or return statements for the final output.".to_string(),
       schema: schema_json
     };
