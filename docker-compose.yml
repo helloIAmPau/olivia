@@ -164,6 +164,11 @@ configs:
       model = "anthropic/claude-sonnet-4-5"
       prompt = "You must help us with some simple tasks"
 
+      [agent.stores.default]
+      type = "postgres"
+      connection_string = "postgresql://test:test123@postgres:5432/olivia"
+      prompt = "This is the default storage for the agent. Every time you have to save something, feel free to create a new table and put data in it. You can reload information from there."
+
       [services.test_bot]
       type = "telegram"
       token = "${OLIVIA_TELEGRAM_TOKEN}"

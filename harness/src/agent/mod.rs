@@ -2,6 +2,7 @@ pub mod llm_client;
 pub mod tool_registry;
 pub mod tool;
 
+use std::collections::HashMap;
 use std::io::Error as IoError;
 use std::fmt::Result as FormatterResult;
 use std::fmt::Formatter;
@@ -71,9 +72,27 @@ impl Display for AgentError {
 }
 
 #[derive(Deserialize)]
+pub struct PostgresConfig {
+  pub connection_string: String,
+  pub prompt: String
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum AgentStoreConfig {
+  Postgres(PostgresConfig)
+}
+
+fn default_stores() -> HashMap<String, AgentStoreConfig> {
+  return HashMap::new();
+}
+
+#[derive(Deserialize)]
 pub struct AgentConfig {
   pub prompt: String,
-  pub model: String
+  pub model: String,
+  #[serde(default = "default_stores")]
+  pub stores: HashMap<String, AgentStoreConfig>
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -98,12 +117,13 @@ pub struct AgentPayload {
   pub params: Option<String>
 }
 
-const MAX_ITERATIONS: i32 = 20;
+const MAX_ITERATIONS: i32 = 200;
 
 pub struct Agent {
   client: LLMClient,
   config: AgentConfig,
-  registry: ToolRegistry
+  registry: ToolRegistry,
+  store_prompt: String
 }
 
 impl Agent {
@@ -137,10 +157,20 @@ impl Agent {
       }
     };
 
+    let mut store_prompt = "".to_string();
+    for (name, config) in &config.stores {
+      match config {
+        AgentStoreConfig::Postgres(postgres_config) => {
+          store_prompt = format!("{}\n{} - {}\ntype: postgres\nconnection string: {}\n", store_prompt, name, postgres_config.prompt, postgres_config.connection_string);
+        }
+      }
+    }
+
     let agent = Self {
       client,
       config,
-      registry
+      registry,
+      store_prompt
     };
 
     return Ok(agent);
@@ -157,6 +187,7 @@ CRITICAL BEHAVIORAL RULES:
 2. DELEGATE EXECUTION: Do NOT calculate, process heavy logic, or attempt to fulfill execution steps using your internal knowledge. You must use the provided tools to execute ANY action, retrieve ANY information, or process ANY logic. You are a router and coordinator.
 3. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
 4. CONVERSATIONAL JSON: You possess conversational capabilities, but all dialogue, explanations, updates, and final answers MUST be passed strictly as a string value within the "message" field of your JSON output.
+5. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "description". You must pass the exact "connection_string" and "type" as parameters to the relevant tool to execute the operation.
 
 EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
 * Tool usage
@@ -168,7 +199,10 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
 
 AVAILABLE TOOLS:
 {}
-    "#, self.registry.prompt);
+
+AVAILABLE DATA STORES:
+{}
+    "#, self.registry.prompt, self.store_prompt);
 
     let mut iteration = 0;
     let mut payload = vec![
