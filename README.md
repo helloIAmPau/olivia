@@ -46,9 +46,9 @@ misbehaving tool — see [Security model](#security-model).
                                        │           ▼
                          tool registry ◄──── pick + run in a
                         (loads /tools)        wasm + WASI sandbox
-                                       │
-                                       ▼
-                                LiteLLM ─► Ollama
+                                       │                     │ WASI-HTTP
+                                       ▼                     ▼
+                        LiteLLM ─► Ollama / Anthropic   SearXNG · Browserless
 ```
 
 The agent (self-identified to the model as "OlivIA") wraps each request in a
@@ -56,14 +56,15 @@ developer prompt that forces the model to answer **only** with a small JSON
 envelope: `{"state":"tool", …}` to call a tool, `{"state":"done", …}` on
 success, or `{"state":"error", …}` to give up. When the model asks for a tool,
 the harness runs it in its sandbox and feeds the result back, looping until the
-model returns `done`/`error` or `MAX_ITERATIONS` (3) is reached.
+model returns `done`/`error` or `MAX_ITERATIONS` (20) is reached.
 
 > [!NOTE]
 > **Status:** early / work-in-progress. Config loading, the HTTP and Telegram
-> services, service-to-agent wiring, and the WASM tool runtime (wasmtime
-> component model + WASI) are in place. Harness-side dispatch of a chosen tool
-> (`ToolRegistry::run`) and the auto-generated tool catalogue in the system
-> prompt are being finalized.
+> services, service-to-agent wiring, the WASM tool runtime (wasmtime component
+> model + WASI), harness-side dispatch of a chosen tool (`ToolRegistry::run`),
+> and the auto-generated tool catalogue in the system prompt are all in place.
+> Tools can now reach the network over WASI-HTTP, which powers the bundled
+> `web_search` and `web` tools.
 
 ## WIT as the tool contract
 
@@ -153,7 +154,7 @@ struct YourTool;
 impl Guest for YourTool {
   fn info() -> ToolInfo {
     ToolInfo {
-      name: "Your tool".to_string(),
+      name: "your_tool".to_string(),
       description: "What it does and when to use it".to_string(),
       schema: "{ \"type\": \"object\", \"properties\": { /* ... */ } }".to_string(),
     }
@@ -188,25 +189,38 @@ make develop        # builds + runs the whole stack; rebuilds tools on change
 
 ### Creating tools: WASI & the sandbox
 
-A tool starts with **no** host access. WebAssembly gives memory isolation and no
-ambient authority; host capabilities are handed over explicitly through
-[WASI](https://wasi.dev/). The harness builds each tool's context with
-`WasiCtxBuilder::new().build()` — i.e. **nothing is granted**: no stdio, no
-environment, no filesystem preopens, no network. Every invocation also gets a
-**fresh store**, so tools accumulate no state across calls.
+WebAssembly gives memory isolation and no ambient authority; host capabilities
+are handed over explicitly through [WASI](https://wasi.dev/). The harness builds
+each tool's context in `ToolState::new()`, and today it grants a **deliberately
+small, fixed set** of capabilities to every tool:
+
+- **stdout / stderr** — inherited, so a tool's logging surfaces in the harness logs.
+- **Selected environment variables** — every host variable named
+  `OLIVIA_TOOL_<NAME>` is forwarded to the tool as `<NAME>` (prefix stripped).
+  Nothing else from the host environment is visible.
+- **Outbound HTTP** — `wasmtime-wasi-http` is linked into every tool, so tools
+  can make HTTP requests (this is what `web_search` and `web` use to reach
+  SearXNG and Browserless).
+
+Still **denied**: filesystem preopens, inbound sockets, process args, and any
+host environment variable without the `OLIVIA_TOOL_` prefix. Every invocation
+also gets a **fresh store**, so tools accumulate no state across calls.
 
 > [!WARNING]
-> If a tool needs a capability (a preopened directory, an outbound socket, a
-> clock), that must be granted deliberately on the host side when building the
-> tool's `WasiCtx`. It is never implicit — treat every grant as widening the
-> trust boundary.
+> Outbound HTTP is currently granted to **all** tools, not opted in per tool —
+> a deliberate widening of the trust boundary to support the network tools. If
+> you need finer-grained control (a preopened directory, a clock, or restricting
+> egress), gate it on the host side in `ToolState::new()` / the linker. Treat
+> every grant as widening the trust boundary.
 
 ### Bundled tools
 
-| Tool     | Path            | Params              | What it does                                                                 |
-| -------- | --------------- | ------------------- | --------------------------------------------------------------------------- |
-| `hello`  | `tools/hello/`  | `{ "suffix": … }`   | Reference implementation — returns `Hello <suffix>`.                        |
-| `python` | `tools/python/` | `{ "script": … }`   | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter, inside the same wasm sandbox. |
+| Tool         | Path            | Params            | What it does                                                                 |
+| ------------ | --------------- | ----------------- | --------------------------------------------------------------------------- |
+| `hello_world`| `tools/hello/`  | `{ "suffix": … }` | Reference implementation — returns `Hello <suffix>`.                        |
+| `python`     | `tools/python/` | `{ "script": … }` | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter, inside the same wasm sandbox. |
+| `web_search` | `tools/search/` | `{ "query": … }`  | Searches the web via a [SearXNG](https://docs.searxng.org/) instance (`SEARXNG_HOST`, default `http://searxng:8080`) and returns the JSON results. |
+| `web`        | `tools/web/`    | `{ "code": … }`   | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (`BROWSERLESS_HOST`/`BROWSERLESS_TOKEN`): runs a Puppeteer function you supply and returns its output. |
 
 The `python` tool returns whatever the script assigns to the global
 `__OLIVIA__FINAL__RESULT__` (coerced to a string); `print()` and `return` are not
@@ -255,7 +269,10 @@ Tools are executed with [wasmtime](https://wasmtime.dev/): each file is loaded a
 a `wasmtime::component::Component`, and for every call the harness instantiates
 it into a fresh, sandboxed `Store` (via `wasmtime-wasi`) and invokes the
 generated `call_info` / `call_run` bindings. The runtime is async, so tool calls
-never block the request loop.
+never block the request loop. Outbound HTTP is linked in via
+[`wasmtime-wasi-http`](https://docs.rs/wasmtime-wasi-http), so tools can make
+network requests through WASI — see [the sandbox](#creating-tools-wasi--the-sandbox)
+for exactly which capabilities each tool receives.
 
 ## Security model
 
@@ -282,16 +299,21 @@ a tool that isn't there.
 ### Layer 2 — tools are sandboxed WebAssembly, deny-by-default
 
 Every tool runs as a memory-isolated WebAssembly component with **no ambient
-authority** and a WASI context that grants nothing unless the harness opts a
-capability in (see [the sandbox](#creating-tools-wasi--the-sandbox)). Access is
-something you *hand over*, not something tools *have*.
+authority**: it holds only the capabilities the harness explicitly hands to its
+WASI context (see [the sandbox](#creating-tools-wasi--the-sandbox)). That set is
+deliberately small and enumerated on the host — currently stdout/stderr, the
+`OLIVIA_TOOL_*` environment variables, and outbound HTTP — with the filesystem
+and everything else denied. Access is something you *hand over*, not something
+tools *have*.
 
 ### Why this matters
 
 Even in the worst case — the model is fully jailbroken *and* a tool has a bug —
-the damage is bounded to what that specific tool was explicitly granted. The
-model can't step outside "pick a tool," and the tool can't step outside its
-sandbox. There is no path from "clever prompt" to "arbitrary code on the host."
+the damage is bounded to what tools were explicitly granted. The model can't step
+outside "pick a tool," and a tool can't touch anything outside its sandboxed
+capability set: at most it can log, read its `OLIVIA_TOOL_*` config, and make
+outbound HTTP requests. There is no path from "clever prompt" to "arbitrary code
+on the host" or the host filesystem.
 
 ## Configuration
 
@@ -361,9 +383,12 @@ replies in chat instead). `tool` is an internal loop state; callers only ever se
 ## Building and Testing
 
 The stack runs the harness alongside a LiteLLM proxy, a local Ollama instance,
-and the `tools-builder`. Startup order is enforced via healthchecks: `ollama`
-healthy before `litellm`, `litellm` healthy before `harness`, and `harness`
-waits for `tools-builder` so `/tools` is populated.
+the `tools-builder`, and the backing services the bundled tools reach over
+WASI-HTTP: a [SearXNG](https://docs.searxng.org/) search engine (for `web_search`)
+and a [Browserless](https://www.browserless.io/) headless-Chromium instance (for
+`web`). Startup order is enforced via healthchecks: `ollama` healthy before
+`litellm`, and `litellm` + `searxng` healthy before `harness`, which also waits
+for `tools-builder` so `/tools` is populated.
 
 ```sh
 make develop        # build + run the full stack for local development
@@ -387,11 +412,24 @@ docker compose exec ollama ollama pull gemma4:12b
 
 **Environment**
 
-| Variable             | Used by          | Description                                                        |
-| -------------------- | ---------------- | ----------------------------------------------------------------- |
-| `LITELLM_MASTER_KEY` | harness, litellm | Master key for the LiteLLM proxy.                                 |
-| `LITELLM_HOST`       | harness          | Base URL of the LiteLLM proxy. Defaults to `http://litellm:4000`. |
-| `RUST_LOG`           | harness          | Log filter (e.g. `info`, `debug`). Defaults to `info`.            |
+| Variable                        | Used by          | Description                                                                          |
+| ------------------------------- | ---------------- | ----------------------------------------------------------------------------------- |
+| `LITELLM_MASTER_KEY`            | harness, litellm | Master key for the LiteLLM proxy.                                                    |
+| `LITELLM_HOST`                  | harness          | Base URL of the LiteLLM proxy. Defaults to `http://litellm:4000`.                   |
+| `RUST_LOG`                      | harness          | Log filter (e.g. `info`, `debug`). Defaults to `info`.                              |
+| `ANTHROPIC_KEY`                 | litellm          | API key for the `anthropic/*` entries in the LiteLLM `model_list`. Required when the agent's `model` is an Anthropic model. |
+| `SEARXNG_TOKEN`                 | searxng          | `secret_key` for the SearXNG instance.                                              |
+| `BROWSERLESS_TOKEN`             | browserless      | Auth token for Browserless. Also forwarded to the `web` tool (see below).           |
+| `OLIVIA_TOOL_<NAME>`            | harness → tools  | Any var with this prefix is forwarded into every tool as `<NAME>` (prefix stripped). |
+
+Tools read plainly-named variables; the harness exposes them by setting
+`OLIVIA_TOOL_<NAME>` on its own environment. The bundled network tools use:
+
+| Tool var            | Set on harness as               | Default                    | Description                          |
+| ------------------- | ------------------------------- | -------------------------- | ------------------------------------ |
+| `SEARXNG_HOST`      | `OLIVIA_TOOL_SEARXNG_HOST`      | `http://searxng:8080`      | Base URL of SearXNG (`web_search`).  |
+| `BROWSERLESS_HOST`  | `OLIVIA_TOOL_BROWSERLESS_HOST`  | `http://browserless:3000`  | Base URL of Browserless (`web`).     |
+| `BROWSERLESS_TOKEN` | `OLIVIA_TOOL_BROWSERLESS_TOKEN` | — (required by `web`)      | Browserless auth token (`web`).      |
 
 > [!WARNING]
 > Do not commit real secrets. Keep them in a local, git-ignored env file and
