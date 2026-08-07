@@ -20,6 +20,8 @@ services:
         condition: 'service_healthy'
       tools-builder:
         condition: 'service_started'
+      searxng:
+        condition: 'service_healthy'
     volumes:
       - '.:/source'
       - './data/tools:/tools:ro'
@@ -43,7 +45,7 @@ services:
     command:
       - '--config=/config.yml'
     environment:
-      - "LITELLM_LOG=WARNING"
+      - 'LITELLM_LOG=WARNING'
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
     networks:
       - 'backend'
@@ -87,15 +89,70 @@ services:
       retries: 5
       start_period: '30s'
       start_interval: '3s'
+  searxng:
+    image: 'ghcr.io/searxng/searxng:2026.8.4-c63835bd2'
+    restart: 'always'
+    configs:
+      - source: 'searxng'
+        target: '/etc/searxng/settings.yml'
+    networks:
+      - 'backend'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'wget -q --spider http://localhost:8080/healthz || exit 1'
+      interval: '60s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+      start_interval: '3s'
+#  browserless:
+#    image: 'ghcr.io/browserless/chromium:v2.55.3'
+#    environment:
+#      - 'TOKEN=${BROWSERLESS_TOKEN}'
+#    networks:
+#      - 'backend'
+#    healthcheck:
+#      test:
+#        - 'CMD-SHELL'
+#        - 'curl -f "http://localhost:3000/pressure?token=$${TOKEN}" || exit 1'
+#      interval: '60s'
+#      timeout: '5s'
+#      retries: 5
+#      start_period: '30s'
+#      start_interval: '3s'
 
 networks:
   backend:
   llm:
 
 configs:
+  searxng:
+    content: |
+      use_default_settings: true
+      server:
+        port: 8080
+        bind_address: '0.0.0.0'
+        secret_key: ${SEARXNG_TOKEN}
+      search:
+        safe_search: 0
+        formats:
+          - json
+      use_default_settings:
+        engines:
+          remove:
+            - 'wikidata'
   litellm:
     content: |
       model_list:
+        - model_name: 'anthropic/claude-sonnet-4-5'
+          litellm_params:
+            model: 'anthropic/claude-sonnet-4-5'
+            api_key: ${ANTHROPIC_KEY}
+        - model_name: 'ollama/qwen3.6'
+          litellm_params:
+            model: 'ollama/qwen3.6:27b'
+            api_base: 'http://ollama:11434'
         - model_name: 'ollama/gemma4'
           litellm_params:
             model: 'ollama/gemma4:12b'
@@ -103,7 +160,7 @@ configs:
   test:
     content: |
       [agent]
-      model = "ollama/gemma4"
+      model = "anthropic/claude-sonnet-4-5"
       prompt = "You must help us with some simple tasks"
 
       [services.test_bot]
