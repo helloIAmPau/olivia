@@ -22,3 +22,4 @@ teloxide = { version = "0.17.0", features = ["macros"] }
 
 wasmtime = { version = "47.0.3", features = ["component-model", "async"] }
 wasmtime-wasi = "47.0.3"
+wasmtime-wasi-http = "47.0.3"

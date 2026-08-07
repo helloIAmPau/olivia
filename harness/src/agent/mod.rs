@@ -98,7 +98,7 @@ pub struct AgentPayload {
   pub params: Option<String>
 }
 
-const MAX_ITERATIONS: i32 = 3;
+const MAX_ITERATIONS: i32 = 20;
 
 pub struct Agent {
   client: LLMClient,

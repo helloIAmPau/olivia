@@ -1,5 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::env::vars;
+
+use tracing::info;
 
 use wasmtime::Config;
 use wasmtime::Engine;
@@ -13,7 +16,14 @@ use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtx;
 use wasmtime_wasi::WasiCtxView;
 use wasmtime_wasi::WasiView;
+
 use wasmtime_wasi::p2::add_to_linker_async;
+
+use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p2::add_only_http_to_linker_async;
+use wasmtime_wasi_http::p2::WasiHttpView;
+use wasmtime_wasi_http::p2::WasiHttpCtxView;
+use wasmtime_wasi_http::p2::WasiHttpHooks;
 
 use crate::agent::AgentError;
 
@@ -23,9 +33,43 @@ bindgen!({
   exports: { default: async }
 });
 
+struct ToolHooks;
+
+impl WasiHttpHooks for ToolHooks {}
+
 struct ToolState {
   context: WasiCtx,
-  table: ResourceTable
+  table: ResourceTable,
+  http: WasiHttpCtx,
+  hooks: ToolHooks
+}
+
+impl ToolState {
+  fn new() -> Self {
+    let mut builder = WasiCtx::builder();
+    builder.inherit_stdout();
+    builder.inherit_stderr();
+
+    for (key, value) in vars() {
+      match key.strip_prefix("OLIVIA_TOOL_") {
+        Some(name) => {
+          info!("Loaded env variable {}={}", name, value);
+
+          builder.env(name, value);
+        }
+        _ => {}
+      }
+    }
+
+    let context = builder.build();
+
+    return Self {
+      context,
+      http: WasiHttpCtx::new(),
+      hooks: ToolHooks,
+      table: ResourceTable::new()
+    };
+  }
 }
 
 impl WasiView for ToolState {
@@ -33,6 +77,16 @@ impl WasiView for ToolState {
     return WasiCtxView {
       ctx: &mut self.context,
       table: &mut self.table
+    };
+  }
+}
+
+impl WasiHttpView for ToolState {
+  fn http(&mut self) -> WasiHttpCtxView<'_> {
+    return WasiHttpCtxView {
+      ctx: &mut self.http,
+      table: &mut self.table,
+      hooks: &mut self.hooks
     };
   }
 }
@@ -56,6 +110,12 @@ impl ToolEngine {
 
     let mut linker = Linker::new(&wasm);
     match add_to_linker_async(&mut linker) {
+      Err(error) => {
+        return Err(AgentError::Wasm(error));
+      },
+      _ => {}
+    };
+    match add_only_http_to_linker_async(&mut linker) {
       Err(error) => {
         return Err(AgentError::Wasm(error));
       },
@@ -90,11 +150,7 @@ impl Tool {
   }
 
   pub async fn info(&self) -> Result<ToolInfo, AgentError> {
-    let context = WasiCtx::builder().build();
-    let state = ToolState {
-      context,
-      table: ResourceTable::new()
-    };
+    let state = ToolState::new();
     let mut store = Store::new(&self.engine.wasm, state);
 
     let bindings = match ToolWorld::instantiate_async(&mut store, &self.component, &self.engine.linker).await {
@@ -115,11 +171,7 @@ impl Tool {
   }
 
   pub async fn run(&self, params: String) -> Result<ToolOutput, AgentError> {
-    let context = WasiCtx::builder().inherit_stdout().inherit_stderr().build();
-    let state = ToolState {
-      context,
-      table: ResourceTable::new()
-    };
+    let state = ToolState::new();
     let mut store = Store::new(&self.engine.wasm, state);
 
     let bindings = match ToolWorld::instantiate_async(&mut store, &self.component, &self.engine.linker).await {
