@@ -9,7 +9,7 @@ services:
       - '9000:9000'
     environment:
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
-#      - 'RUST_LOG=debug'
+      - 'OLIVIA_TOOL_BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN}'
     configs:
       - source: 'test'
         target: '/config.toml'
@@ -76,6 +76,7 @@ services:
     environment:
       - 'OLLAMA_DEBUG=false'
       - 'OLLAMA_DEBUG_LOG_REQUESTS=true'
+      - 'OLLAMA_CONTEXT_LENGTH=64000'
     volumes:
       - './data/ollama:/root/.ollama'
     networks:
@@ -106,21 +107,21 @@ services:
       retries: 5
       start_period: '30s'
       start_interval: '3s'
-#  browserless:
-#    image: 'ghcr.io/browserless/chromium:v2.55.3'
-#    environment:
-#      - 'TOKEN=${BROWSERLESS_TOKEN}'
-#    networks:
-#      - 'backend'
-#    healthcheck:
-#      test:
-#        - 'CMD-SHELL'
-#        - 'curl -f "http://localhost:3000/pressure?token=$${TOKEN}" || exit 1'
-#      interval: '60s'
-#      timeout: '5s'
-#      retries: 5
-#      start_period: '30s'
-#      start_interval: '3s'
+  browserless:
+    image: 'ghcr.io/browserless/chromium:v2.55.3'
+    environment:
+      - 'TOKEN=${BROWSERLESS_TOKEN}'
+    networks:
+      - 'backend'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'curl -f "http://localhost:3000/pressure?token=$${TOKEN}" || exit 1'
+      interval: '60s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+      start_interval: '3s'
 
 networks:
   backend:
