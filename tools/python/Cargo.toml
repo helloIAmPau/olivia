@@ -7,6 +7,8 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+common = { path = "../common" }
+
 wit-bindgen = "0.60.0"
 # Builtins-only interpreter. We deliberately avoid the `stdlib` feature /
 # rustpython-stdlib: its 0.5.0 release fails to compile (two incompatible

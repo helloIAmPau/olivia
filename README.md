@@ -217,7 +217,7 @@ also gets a **fresh store**, so tools accumulate no state across calls.
 
 | Tool         | Path            | Params            | What it does                                                                 |
 | ------------ | --------------- | ----------------- | --------------------------------------------------------------------------- |
-| `hello_world`| `tools/hello/`  | `{ "suffix": … }` | Reference implementation — returns `Hello <suffix>`.                        |
+| `hello_tool` | `tools/hello/`  | `{ "suffix": … }` | Reference implementation — returns `Hello <suffix>`.                        |
 | `python`     | `tools/python/` | `{ "script": … }` | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter, inside the same wasm sandbox. |
 | `web_search` | `tools/search/` | `{ "query": … }`  | Searches the web via a [SearXNG](https://docs.searxng.org/) instance (`SEARXNG_HOST`, default `http://searxng:8080`) and returns the JSON results. |
 | `web`        | `tools/web/`    | `{ "code": … }`   | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (`BROWSERLESS_HOST`/`BROWSERLESS_TOKEN`): runs a Puppeteer function you supply and returns its output. |
