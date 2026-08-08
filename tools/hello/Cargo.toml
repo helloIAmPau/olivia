@@ -7,6 +7,8 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+common = { path = "../common" }
+
 wit-bindgen = "0.60.0"
 
 schemars = "1.2.2"
