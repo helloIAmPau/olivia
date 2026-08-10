@@ -77,10 +77,29 @@ pub struct PostgresConfig {
   pub prompt: String
 }
 
+fn default_clickhouse_username() -> String {
+  return "default".to_string();
+}
+
+fn default_clickhouse_password() -> String {
+  return "".to_string();
+}
+
+#[derive(Deserialize)]
+pub struct ClickhouseConfig {
+  pub host: String,
+  #[serde(default = "default_clickhouse_username")]
+  pub username: String,
+  #[serde(default = "default_clickhouse_password")]
+  pub password: String,
+  pub prompt: String
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AgentStoreConfig {
-  Postgres(PostgresConfig)
+  Postgres(PostgresConfig),
+  Clickhouse(ClickhouseConfig)
 }
 
 fn default_stores() -> HashMap<String, AgentStoreConfig> {
@@ -162,6 +181,9 @@ impl Agent {
       match config {
         AgentStoreConfig::Postgres(postgres_config) => {
           store_prompt = format!("{}\n{} - {}\ntype: postgres\nconnection string: {}\n", store_prompt, name, postgres_config.prompt, postgres_config.connection_string);
+        },
+        AgentStoreConfig::Clickhouse(clickhouse_config) => {
+          store_prompt = format!("{}\n{} - {}\ntype: clickhouse\nhost: {}\nusername: {}\npassword: {}\n", store_prompt, name, clickhouse_config.prompt, clickhouse_config.host, clickhouse_config.username, clickhouse_config.password);
         }
       }
     }
@@ -187,7 +209,7 @@ CRITICAL BEHAVIORAL RULES:
 2. DELEGATE EXECUTION: Do NOT calculate, process heavy logic, or attempt to fulfill execution steps using your internal knowledge. You must use the provided tools to execute ANY action, retrieve ANY information, or process ANY logic. You are a router and coordinator.
 3. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
 4. CONVERSATIONAL JSON: You possess conversational capabilities, but all dialogue, explanations, updates, and final answers MUST be passed strictly as a string value within the "message" field of your JSON output.
-5. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "description". You must pass the exact "connection_string" and "type" as parameters to the relevant tool to execute the operation.
+5. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "description". You must pass the exact "connection_string" and "type" as parameters to the relevant tool to execute the operation. Never leak the store information to the reply (username, password or urls), but always refer to them using their name.
 
 EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
 * Tool usage

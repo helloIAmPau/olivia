@@ -39,7 +39,7 @@ enum Commands {
   Do(String)
 }
 
-async fn answer(bot: Bot, message: Message, command: Commands, state: Arc<ServiceState<TelegramConfig>>) -> ResponseResult<()> {
+async fn handle_command(bot: Bot, message: Message, command: Commands, state: Arc<ServiceState<TelegramConfig>>) -> ResponseResult<()> {
   info!("Received new message on bot {}", state.name);
 
   match command {
@@ -100,11 +100,26 @@ async fn answer(bot: Bot, message: Message, command: Commands, state: Arc<Servic
   };
 }
 
+async fn handle_message(message: Message, state: Arc<ServiceState<TelegramConfig>>) -> ResponseResult<()> {
+  match message.text() {
+    Some(text) => {
+      info!("Received non-command message on bot {}: {}", state.name, text);
+    },
+    None => {
+      info!("Received non-command message on bot {} with no text", state.name);
+    }
+  }
+
+  return Ok(());
+}
+
 pub async fn init_telegram(name: String, config: TelegramConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
   info!("Initializng {} service as bot telegram", name);
 
   let bot = Bot::new(&config.token);
-  let handler = Update::filter_message().filter_command::<Commands>().endpoint(answer);
+  let handler = Update::filter_message()
+    .branch(dptree::entry().filter_command::<Commands>().endpoint(handle_command))
+    .branch(dptree::endpoint(handle_message));
   let state = Arc::new(ServiceState::<TelegramConfig> {
     name,
     config,
