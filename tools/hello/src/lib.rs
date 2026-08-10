@@ -9,7 +9,7 @@ struct HelloParams {
   suffix: String
 }
 
-fn execute_hello(input: HelloParams) -> ToolOutput {
+fn run(input: HelloParams) -> ToolOutput {
   ToolOutput {
     state: ToolOutputState::Done,
     content: format!("Hello {}", input.suffix)
@@ -20,5 +20,5 @@ define_tool!(
   HelloTool,
   HelloParams,
   "A simple hello-world tool returning hello + a string received as argument",
-  execute_hello
+  run
 );
