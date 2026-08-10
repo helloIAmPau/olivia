@@ -85,6 +85,8 @@ impl ToolRegistry {
   }
 
   pub async fn run(&self, name: String, params: String) -> Result<String, AgentError> {
+    info!("Received request to run tool {} with params: {}", name, params);
+
     let tool = match self.tools.get(&name) {
       Some(tool) => tool,
       None => {

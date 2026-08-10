@@ -14,7 +14,7 @@ struct SearchParams {
   query: String
 }
 
-fn execute_search(input: SearchParams) -> ToolOutput {
+fn run(input: SearchParams) -> ToolOutput {
   let base = match var("SEARXNG_HOST") {
     Ok(base) => base,
     Err(_) => "http://searxng:8080".to_string()
@@ -55,5 +55,5 @@ define_tool!(
   WebSearch,
   SearchParams,
   "Searches the internet for a query and returns the top results as title, url and description. Use it whenever you need fresh or external information you do not already know.",
-  execute_search
+  run
 );

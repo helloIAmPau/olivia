@@ -1,3 +1,5 @@
+pub mod tcp_socket;
+
 pub use paste::paste;
 
 #[macro_export]

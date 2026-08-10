@@ -24,7 +24,7 @@ struct FunctionRequest {
   code: String
 }
 
-fn execute_web(input: WebParams) -> ToolOutput {
+fn run(input: WebParams) -> ToolOutput {
   let token = match var("BROWSERLESS_TOKEN") {
     Ok(token) => token,
     Err(_) => {
@@ -86,5 +86,5 @@ define_tool!(
   Web,
   WebParams,
   "Drives a headless browser through the browserless /function API. Provide the body of a JavaScript module that default-exports an async function receiving { page, context } (page is a Puppeteer Page) and returning { data, type }. Use it to browse, scrape or screenshot pages whenever you need fresh or external information you do not already have.",
-  execute_web
+  run
 );

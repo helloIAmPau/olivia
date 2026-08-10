@@ -22,6 +22,10 @@ services:
         condition: 'service_started'
       searxng:
         condition: 'service_healthy'
+      postgres:
+        condition: 'service_healthy'
+      clickhouse:
+        condition: 'service_healthy'
     volumes:
       - '.:/source'
       - './data/tools:/tools:ro'
@@ -107,6 +111,51 @@ services:
       retries: 5
       start_period: '30s'
       start_interval: '3s'
+  postgres:
+    image: 'postgres:17.6'
+    restart: 'always'
+    environment:
+      - 'POSTGRES_USER=${POSTGRES_USER}'
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD}'
+      - 'POSTGRES_DB=${POSTGRES_DB}'
+      - 'POSTGRES_HOST_AUTH_METHOD=password'
+    volumes:
+      - './data/postgres:/var/lib/postgresql/data'
+    networks:
+      - 'backend'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1'
+      interval: '60s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+      start_interval: '3s'
+  clickhouse:
+    image: 'clickhouse/clickhouse-server:25.6'
+    restart: 'always'
+    environment:
+      - 'CLICKHOUSE_USER=${CLICKHOUSE_USER}'
+      - 'CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}'
+      - 'CLICKHOUSE_DB=${CLICKHOUSE_DB}'
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - './data/clickhouse:/var/lib/clickhouse'
+    networks:
+      - 'backend'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1'
+      interval: '60s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+      start_interval: '3s'
   browserless:
     image: 'ghcr.io/browserless/chromium:v2.55.3'
     environment:
@@ -166,8 +215,20 @@ configs:
 
       [agent.stores.default]
       type = "postgres"
-      connection_string = "postgresql://test:test123@postgres:5432/olivia"
+      connection_string = "${POSTGRES_CONNECTION_STRING}"
       prompt = "This is the default storage for the agent. Every time you have to save something, feel free to create a new table and put data in it. You can reload information from there."
+
+      [agent.stores.analytics]
+      type = "clickhouse"
+      host = "http://clickhouse:8123"
+      username = "${CLICKHOUSE_USER}"
+      password = "${CLICKHOUSE_PASSWORD}"
+      prompt = "This is a column-oriented ClickHouse store for analytical workloads. Use it for large-scale aggregations, reporting and time-series style queries over immutable events rather than for row-level updates."
+
+      [services.test_cron]
+      type = "cron"
+      schedule = "* 1/5 * * * *"
+      prompt = "Check the weather in milan"
 
       [services.test_bot]
       type = "telegram"

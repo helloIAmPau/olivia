@@ -15,7 +15,7 @@ struct PythonParams {
   script: String
 }
 
-fn execute_python(input: PythonParams) -> ToolOutput {
+fn run(input: PythonParams) -> ToolOutput {
   let interpreter = Interpreter::without_stdlib(Default::default());
 
   return interpreter.enter(|vm| {
@@ -93,5 +93,5 @@ define_tool!(
   Python,
   PythonParams,
   "Executes Python 3 (CPython >= 3.14.0) scripts. CRITICAL: To return data from the script, you MUST assign the final output as a string to the global variable __OLIVIA__FINAL__RESULT__. Example: __OLIVIA__FINAL__RESULT__ = str(my_data). Do not use print() or return statements for the final output.",
-  execute_python
+  run
 );

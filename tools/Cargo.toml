@@ -1,3 +1,3 @@
 [workspace]
-members = ["common", "hello", "python", "search", "web"]
+members = ["clickhouse", "common", "hello", "postgres", "python", "search", "web"]
 resolver = "2"

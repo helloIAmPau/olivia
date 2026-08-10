@@ -49,6 +49,8 @@ impl ToolState {
     let mut builder = WasiCtx::builder();
     builder.inherit_stdout();
     builder.inherit_stderr();
+    builder.inherit_network();
+    builder.allow_ip_name_lookup(true);
 
     for (key, value) in vars() {
       match key.strip_prefix("OLIVIA_TOOL_") {
