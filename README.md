@@ -64,7 +64,9 @@ model returns `done`/`error` or `MAX_ITERATIONS` (20) is reached.
 > model + WASI), harness-side dispatch of a chosen tool (`ToolRegistry::run`),
 > and the auto-generated tool catalogue in the system prompt are all in place.
 > Tools can now reach the network over WASI-HTTP, which powers the bundled
-> `web_search` and `web` tools.
+> `web_search` and `web` tools. Tools can also talk to data stores declared
+> under `[agent.stores]` — the bundled `postgres_client` (wire protocol over raw
+> TCP) and `clickhouse_client` (HTTP interface) tools.
 
 ## WIT as the tool contract
 
@@ -200,18 +202,24 @@ small, fixed set** of capabilities to every tool:
   Nothing else from the host environment is visible.
 - **Outbound HTTP** — `wasmtime-wasi-http` is linked into every tool, so tools
   can make HTTP requests (this is what `web_search` and `web` use to reach
-  SearXNG and Browserless).
+  SearXNG and Browserless, and what `clickhouse_client` uses to reach
+  ClickHouse's HTTP interface).
+- **Outbound TCP + DNS** — `inherit_network()` grants raw outbound sockets and
+  name resolution, so socket-based tools can reach networked services (this is
+  what `postgres_client` uses to speak the wire protocol to a database).
 
 Still **denied**: filesystem preopens, inbound sockets, process args, and any
 host environment variable without the `OLIVIA_TOOL_` prefix. Every invocation
 also gets a **fresh store**, so tools accumulate no state across calls.
 
 > [!WARNING]
-> Outbound HTTP is currently granted to **all** tools, not opted in per tool —
-> a deliberate widening of the trust boundary to support the network tools. If
-> you need finer-grained control (a preopened directory, a clock, or restricting
-> egress), gate it on the host side in `ToolState::new()` / the linker. Treat
-> every grant as widening the trust boundary.
+> Outbound HTTP **and** raw outbound TCP/DNS are currently granted to **all**
+> tools, not opted in per tool — a deliberate widening of the trust boundary to
+> support the network tools. If you need finer-grained control (a preopened
+> directory, a clock, or restricting egress), gate it on the host side in
+> `ToolState::new()` (e.g. swap `inherit_network()` for `allow_tcp` +
+> `socket_addr_check`) / the linker. Treat every grant as widening the trust
+> boundary.
 
 ### Bundled tools
 
@@ -221,6 +229,8 @@ also gets a **fresh store**, so tools accumulate no state across calls.
 | `python`     | `tools/python/` | `{ "script": … }` | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter, inside the same wasm sandbox. |
 | `web_search` | `tools/search/` | `{ "query": … }`  | Searches the web via a [SearXNG](https://docs.searxng.org/) instance (`SEARXNG_HOST`, default `http://searxng:8080`) and returns the JSON results. |
 | `web`        | `tools/web/`    | `{ "code": … }`   | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (`BROWSERLESS_HOST`/`BROWSERLESS_TOKEN`): runs a Puppeteer function you supply and returns its output. |
+| `postgres_client` | `tools/postgres/` | `{ "connection_string": …, "query": … }` | Runs a single SQL statement against a PostgreSQL store (the `connection_string` comes from an `[agent.stores]` entry) and returns the result as CSV (a header row of column names followed by one row per record). Speaks the v3 wire protocol directly over `std::net` (cleartext-password or trust auth; no SCRAM, no TLS). |
+| `clickhouse_client` | `tools/clickhouse/` | `{ "host": …, "username": …, "password": …, "query": … }` | Runs a single SQL statement against a ClickHouse store (the `host`/`username`/`password` come from an `[agent.stores]` entry) over the HTTP interface and returns a `SELECT`'s result as CSV (a header row of column names followed by one row per record). Requests `default_format=CSVWithNames`, so result-less statements (`CREATE`, `INSERT`, …) stay valid. `host` must carry an explicit `http://`/`https://` scheme. |
 
 The `python` tool returns whatever the script assigns to the global
 `__OLIVIA__FINAL__RESULT__` (coerced to a string); `print()` and `return` are not
@@ -324,6 +334,19 @@ The harness loads its configuration from `/config.toml`:
 model = "ollama/gemma4"
 prompt = "You must help us with some simple tasks"
 
+# Data stores the agent can read from / write to via the matching tool
+[agent.stores.default]
+type = "postgres"
+connection_string = "postgresql://user:password@postgres:5432/olivia"
+prompt = "Default relational store — create tables and persist data here."
+
+[agent.stores.analytics]
+type = "clickhouse"
+host = "http://clickhouse:8123"   # must include the http:// or https:// scheme
+username = "default"               # optional, defaults to "default"
+password = ""                      # optional, defaults to empty
+prompt = "Column-oriented store for large-scale aggregations and reporting."
+
 # An HTTP service on the default address/port (0.0.0.0:80)
 [services.test_http]
 type = "http"
@@ -347,12 +370,35 @@ prompt = "Generate a classic Hello Something using the content of the request"
 type = "telegram"
 token = "123456:ABC-DEF..."   # bot token from @BotFather
 prompt = "You are a helpful assistant reachable from Telegram"
+
+# A cron service that wakes the agent on a schedule
+[services.hourly_report]
+type = "cron"
+schedule = "0 0 * * * *"   # 6-field cron (sec min hour day month weekday): top of every hour
+prompt = "Summarise what happened in the last hour and store it."
 ```
 
 **`[agent]`** — `model` (string, required): a model ID registered in the LiteLLM
 `model_list`. `prompt` (string, required): the agent system prompt.
 
-**`[services.<name>]`** — `type` (string, required): `http` or `telegram`.
+**`[agent.stores.<name>]`** — an optional data store the agent may use. `type`
+(string, required) selects the backend and the tool that talks to it, and
+`prompt` (string, required) describes the store to the model so it can pick the
+right one. The remaining fields depend on `type`:
+
+- **`postgres`** — `connection_string` (required), e.g.
+  `postgresql://user:pass@host:5432/db`.
+- **`clickhouse`** — `host` (required, must include an explicit `http://` or
+  `https://` scheme, e.g. `http://clickhouse:8123`), `username` (optional,
+  default `default`), `password` (optional, default empty).
+
+Each store is listed to the model under **AVAILABLE DATA STORES** in the system
+prompt; the model forwards its connection details to the matching tool
+(`postgres_client` / `clickhouse_client`) and is instructed never to leak them
+back into a reply.
+
+**`[services.<name>]`** — `type` (string, required): `http`, `telegram`, or
+`cron`.
 
 **`http` service** — `port` (u16, default `80`), `address` (string, default
 `0.0.0.0`), `endpoints` (table, required).
@@ -365,7 +411,19 @@ forwarded to the agent as context.
 **`telegram` service** — `token` (string, required): the bot token from
 [@BotFather](https://t.me/BotFather). `prompt` (string, required): the system
 prompt. The bot answers two commands: `/help` (lists commands) and `/do <text>`,
-which runs `<text>` through the agent and replies with the result in chat.
+which runs `<text>` through the agent and replies with the result in chat. Plain
+(non-command) messages are received and logged, but not yet routed to the agent.
+
+**`cron` service** — `schedule` (string, required): a cron expression in the
+6-field, seconds-precision form used by
+[`tokio-cron-scheduler`](https://docs.rs/tokio-cron-scheduler) —
+`sec min hour day-of-month month day-of-week` (a 7th field for the year is also
+accepted). `prompt` (string, required): the instruction handed to the agent on
+each activation. On every tick the service invokes the agent with a system
+message noting the job name and schedule, followed by `prompt`; there is no
+inbound request and no caller, so the run's result is logged rather than
+returned. Use it for recurring background work — periodic reports, polling,
+cache warming, and the like.
 
 **HTTP response** — every `http` endpoint responds with a JSON envelope (Telegram
 replies in chat instead). `tool` is an internal loop state; callers only ever see
