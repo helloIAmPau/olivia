@@ -40,23 +40,22 @@ Together these bound the blast radius of both a misbehaving model and a
 misbehaving tool — see [Security model](#security-model).
 
 ```
-  HTTP request  ─┐
-                 ├─►  service  ─►  agent (router) ──┐  "tool"
-  Telegram msg  ─┘                     ▲           │
-                                       │           ▼
-                         tool registry ◄──── pick + run in a
-                        (loads /tools)        wasm + WASI sandbox
-                                       │                     │ WASI-HTTP
-                                       ▼                     ▼
-                        LiteLLM ─► Ollama / Anthropic   SearXNG · Browserless
+                              tool registry ─► pick + run in a wasm + WASI sandbox ─► SearXNG · Browserless · Postgres · ClickHouse · S3
+                                 ▲   │
+  HTTP request ─┐                │   ▼
+  Telegram msg ─┼─► service ─►  agent (router) ─► done / error
+  cron tick    ─┘                │   ▲
+                                 ▼   │
+                              LiteLLM ─► Ollama / Anthropic
 ```
 
 The agent (self-identified to the model as "OlivIA") wraps each request in a
 developer prompt that forces the model to answer **only** with a small JSON
 envelope: `{"state":"tool", …}` to call a tool, `{"state":"done", …}` on
-success, or `{"state":"error", …}` to give up. When the model asks for a tool,
-the harness runs it in its sandbox and feeds the result back, looping until the
-model returns `done`/`error` or `MAX_ITERATIONS` (20) is reached.
+success, or `{"state":"error", …}` to give up. Each iteration the agent asks the
+model what to do next; when the model asks for a tool, the harness runs it in its
+sandbox and appends the result to the conversation, looping until the model
+returns `done`/`error` or `MAX_ITERATIONS` (200) is reached.
 
 > [!NOTE]
 > **Status:** early / work-in-progress. Config loading, the HTTP and Telegram
@@ -66,7 +65,8 @@ model returns `done`/`error` or `MAX_ITERATIONS` (20) is reached.
 > Tools can now reach the network over WASI-HTTP, which powers the bundled
 > `web_search` and `web` tools. Tools can also talk to data stores declared
 > under `[agent.stores]` — the bundled `postgres_client` (wire protocol over raw
-> TCP) and `clickhouse_client` (HTTP interface) tools.
+> TCP), `clickhouse_client` (HTTP interface) and `s3_client` (S3-compatible
+> object storage) tools.
 
 ## WIT as the tool contract
 
@@ -202,8 +202,8 @@ small, fixed set** of capabilities to every tool:
   Nothing else from the host environment is visible.
 - **Outbound HTTP** — `wasmtime-wasi-http` is linked into every tool, so tools
   can make HTTP requests (this is what `web_search` and `web` use to reach
-  SearXNG and Browserless, and what `clickhouse_client` uses to reach
-  ClickHouse's HTTP interface).
+  SearXNG and Browserless, what `clickhouse_client` uses to reach ClickHouse's
+  HTTP interface, and what `s3_client` uses to reach an S3-compatible store).
 - **Outbound TCP + DNS** — `inherit_network()` grants raw outbound sockets and
   name resolution, so socket-based tools can reach networked services (this is
   what `postgres_client` uses to speak the wire protocol to a database).
@@ -231,6 +231,7 @@ also gets a **fresh store**, so tools accumulate no state across calls.
 | `web`        | `tools/web/`    | `{ "code": … }`   | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (`BROWSERLESS_HOST`/`BROWSERLESS_TOKEN`): runs a Puppeteer function you supply and returns its output. |
 | `postgres_client` | `tools/postgres/` | `{ "connection_string": …, "query": … }` | Runs a single SQL statement against a PostgreSQL store (the `connection_string` comes from an `[agent.stores]` entry) and returns the result as CSV (a header row of column names followed by one row per record). Speaks the v3 wire protocol directly over `std::net` (cleartext-password or trust auth; no SCRAM, no TLS). |
 | `clickhouse_client` | `tools/clickhouse/` | `{ "host": …, "username": …, "password": …, "query": … }` | Runs a single SQL statement against a ClickHouse store (the `host`/`username`/`password` come from an `[agent.stores]` entry) over the HTTP interface and returns a `SELECT`'s result as CSV (a header row of column names followed by one row per record). Requests `default_format=CSVWithNames`, so result-less statements (`CREATE`, `INSERT`, …) stay valid. `host` must carry an explicit `http://`/`https://` scheme. |
+| `s3_client` | `tools/s3/` | `{ "bucket": …, "region": …, "endpoint": …, "access_key": …, "secret_key": …, "operation": …, "key": …, "content": … }` | Manages files in an S3-compatible object store (AWS S3, [RustFS](https://rustfs.com/), MinIO, …) — the connection fields come from an `[agent.stores]` entry. `operation` is one of `list` (list the bucket), `create` (upload `content` to `key`), `delete` (remove `key`) or `download` (return `key`'s contents). Signs each request with SigV4 ([`rusty-s3`](https://docs.rs/rusty-s3), Sans-IO) and sends it over HTTP; `endpoint` must carry an explicit `http://`/`https://` scheme. |
 
 The `python` tool returns whatever the script assigns to the global
 `__OLIVIA__FINAL__RESULT__` (coerced to a string); `print()` and `return` are not
@@ -347,6 +348,15 @@ username = "default"               # optional, defaults to "default"
 password = ""                      # optional, defaults to empty
 prompt = "Column-oriented store for large-scale aggregations and reporting."
 
+[agent.stores.files]
+type = "s3"
+bucket = "olivia-files"
+endpoint = "http://rustfs:9000"    # must include the http:// or https:// scheme
+region = "us-east-1"               # optional, defaults to "us-east-1"
+access_key = "rustfsadmin"
+secret_key = "rustfsadmin"
+prompt = "S3-compatible object store for files and blobs."
+
 # An HTTP service on the default address/port (0.0.0.0:80)
 [services.test_http]
 type = "http"
@@ -391,11 +401,14 @@ right one. The remaining fields depend on `type`:
 - **`clickhouse`** — `host` (required, must include an explicit `http://` or
   `https://` scheme, e.g. `http://clickhouse:8123`), `username` (optional,
   default `default`), `password` (optional, default empty).
+- **`s3`** — `bucket` (required), `endpoint` (required, must include an explicit
+  `http://` or `https://` scheme, e.g. `http://rustfs:9000`), `access_key`
+  (required), `secret_key` (required), `region` (optional, default `us-east-1`).
 
 Each store is listed to the model under **AVAILABLE DATA STORES** in the system
 prompt; the model forwards its connection details to the matching tool
-(`postgres_client` / `clickhouse_client`) and is instructed never to leak them
-back into a reply.
+(`postgres_client` / `clickhouse_client` / `s3_client`) and is instructed never
+to leak them back into a reply.
 
 **`[services.<name>]`** — `type` (string, required): `http`, `telegram`, or
 `cron`.

@@ -26,6 +26,8 @@ services:
         condition: 'service_healthy'
       clickhouse:
         condition: 'service_healthy'
+      rustfs:
+        condition: 'service_healthy'
     volumes:
       - '.:/source'
       - './data/tools:/tools:ro'
@@ -156,6 +158,28 @@ services:
       retries: 5
       start_period: '30s'
       start_interval: '3s'
+  rustfs:
+    image: 'rustfs/rustfs:latest'
+    restart: 'always'
+    environment:
+      - 'RUSTFS_VOLUMES=/data/rustfs0'
+      - 'RUSTFS_ADDRESS=0.0.0.0:9000'
+      - 'RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY}'
+      - 'RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}'
+      - 'RUSTFS_CONSOLE_ENABLE=false'
+    volumes:
+      - './data/rustfs:/data'
+    networks:
+      - 'backend'
+    healthcheck:
+      test:
+        - 'CMD-SHELL'
+        - 'curl -fsS http://localhost:9000/health || exit 1'
+      interval: '60s'
+      timeout: '5s'
+      retries: 5
+      start_period: '30s'
+      start_interval: '3s'
   browserless:
     image: 'ghcr.io/browserless/chromium:v2.55.3'
     environment:
@@ -224,6 +248,15 @@ configs:
       username = "${CLICKHOUSE_USER}"
       password = "${CLICKHOUSE_PASSWORD}"
       prompt = "This is a column-oriented ClickHouse store for analytical workloads. Use it for large-scale aggregations, reporting and time-series style queries over immutable events rather than for row-level updates."
+
+      [agent.stores.files]
+      type = "s3"
+      bucket = "${S3_BUCKET}"
+      region = "us-east-1"
+      endpoint = "http://rustfs:9000"
+      access_key = "${RUSTFS_ACCESS_KEY}"
+      secret_key = "${RUSTFS_SECRET_KEY}"
+      prompt = "This is an S3-compatible object store for files and blobs. Use it to save, list, download and delete documents and other files rather than structured relational data."
 
       [services.test_cron]
       type = "cron"

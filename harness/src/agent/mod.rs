@@ -95,11 +95,27 @@ pub struct ClickhouseConfig {
   pub prompt: String
 }
 
+fn default_s3_region() -> String {
+  return "us-east-1".to_string();
+}
+
+#[derive(Deserialize)]
+pub struct S3Config {
+  pub bucket: String,
+  #[serde(default = "default_s3_region")]
+  pub region: String,
+  pub endpoint: String,
+  pub access_key: String,
+  pub secret_key: String,
+  pub prompt: String
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AgentStoreConfig {
   Postgres(PostgresConfig),
-  Clickhouse(ClickhouseConfig)
+  Clickhouse(ClickhouseConfig),
+  S3(S3Config)
 }
 
 fn default_stores() -> HashMap<String, AgentStoreConfig> {
@@ -184,6 +200,9 @@ impl Agent {
         },
         AgentStoreConfig::Clickhouse(clickhouse_config) => {
           store_prompt = format!("{}\n{} - {}\ntype: clickhouse\nhost: {}\nusername: {}\npassword: {}\n", store_prompt, name, clickhouse_config.prompt, clickhouse_config.host, clickhouse_config.username, clickhouse_config.password);
+        },
+        AgentStoreConfig::S3(s3_config) => {
+          store_prompt = format!("{}\n{} - {}\ntype: s3\nbucket: {}\nregion: {}\nendpoint: {}\naccess_key: {}\nsecret_key: {}\n", store_prompt, name, s3_config.prompt, s3_config.bucket, s3_config.region, s3_config.endpoint, s3_config.access_key, s3_config.secret_key);
         }
       }
     }
