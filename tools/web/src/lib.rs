@@ -45,7 +45,7 @@ fn run(input: WebParams) -> ToolOutput {
     code: input.code
   };
 
-  let response = match Client::new().post(endpoint.as_str()).query([("token", token)]).json(&payload).send() {
+  let response = match Client::new().post(endpoint.as_str()).query([("token", token), ("launch", "{\"stealth\":true}".to_string())]).json(&payload).send() {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {

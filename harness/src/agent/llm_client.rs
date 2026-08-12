@@ -158,7 +158,7 @@ impl LLMClient {
       }
     };
 
-    for field in ["state", "message", "name", "params", "result"] {
+    for field in ["state", "error_message", "name", "params", "result"] {
       let value = json!(field);
       if required_array.contains(&value) {
         continue;
@@ -192,6 +192,8 @@ impl LLMClient {
 
     info!("Received response\n{:#?}", response);
 
+    let status = response.status();
+
     let content = match response.text().await {
       Ok(content) => content,
       Err(error) => {
@@ -200,6 +202,10 @@ impl LLMClient {
     };
 
     debug!("Response body\n{}", content);
+
+    if status.is_success() == false {
+      return Err(AgentError::LLMRequest(status.as_u16(), content));
+    }
 
     let mut result: ChatResponse = match from_str(&content) {
       Ok(result) => result,

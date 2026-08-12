@@ -31,6 +31,7 @@ services:
     volumes:
       - '.:/source'
       - './data/tools:/tools:ro'
+      - './data/olivia/sandbox:/sandbox'
   tools-builder:
     image: 'olivia/tools:${VERSION:-0.0.0}-next'
     restart: 'always'
@@ -167,8 +168,12 @@ services:
       - 'RUSTFS_ACCESS_KEY=${RUSTFS_ACCESS_KEY}'
       - 'RUSTFS_SECRET_KEY=${RUSTFS_SECRET_KEY}'
       - 'RUSTFS_CONSOLE_ENABLE=false'
+      - 'RUSTFS_CONSOLE_ENABLE=true'
     volumes:
       - './data/rustfs:/data'
+    ports:
+      - '9001:9001'
+    user: 'root'
     networks:
       - 'backend'
     healthcheck:
@@ -219,10 +224,18 @@ configs:
   litellm:
     content: |
       model_list:
-        - model_name: 'anthropic/claude-sonnet-4-5'
+        - model_name: 'openai/gpt-4o'
           litellm_params:
-            model: 'anthropic/claude-sonnet-4-5'
-            api_key: ${ANTHROPIC_KEY}
+            model: 'openai/gpt-4o'
+            api_key: ${OPENAI_API_KEY}
+        - model_name: 'anthropic/claude-sonnet-5'
+          litellm_params:
+            model: 'anthropic/claude-sonnet-5'
+            api_key: ${OLIVIA_ANTHROPIC_KEY}
+        - model_name: 'anthropic/claude-haiku-4-5'
+          litellm_params:
+            model: 'anthropic/claude-haiku-4-5'
+            api_key: ${OLIVIA_ANTHROPIC_KEY}
         - model_name: 'ollama/qwen3.6'
           litellm_params:
             model: 'ollama/qwen3.6:27b'
@@ -232,9 +245,14 @@ configs:
             model: 'ollama/gemma4:12b'
             api_base: 'http://ollama:11434'
   test:
+#      [services.test_cron]
+#      type = "cron"
+#      schedule = "* 1/5 * * * *"
+#      prompt = "Check the weather in milan"
+
     content: |
       [agent]
-      model = "anthropic/claude-sonnet-4-5"
+      model = "anthropic/claude-sonnet-5"
       prompt = "You must help us with some simple tasks"
 
       [agent.stores.default]
@@ -257,11 +275,6 @@ configs:
       access_key = "${RUSTFS_ACCESS_KEY}"
       secret_key = "${RUSTFS_SECRET_KEY}"
       prompt = "This is an S3-compatible object store for files and blobs. Use it to save, list, download and delete documents and other files rather than structured relational data."
-
-      [services.test_cron]
-      type = "cron"
-      schedule = "* 1/5 * * * *"
-      prompt = "Check the weather in milan"
 
       [services.test_bot]
       type = "telegram"

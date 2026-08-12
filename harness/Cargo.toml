@@ -22,6 +22,8 @@ teloxide = { version = "0.17.0", features = ["macros"] }
 
 tokio-cron-scheduler = "0.15.1"
 
+uuid = { version = "1.24.0", features = ["v4"] }
+
 wasmtime = { version = "47.0.3", features = ["component-model", "async"] }
 wasmtime-wasi = "47.0.3"
 wasmtime-wasi-http = "47.0.3"

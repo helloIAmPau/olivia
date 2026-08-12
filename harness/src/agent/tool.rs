@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::env::vars;
 
 use tracing::info;
+use tracing::error;
 
 use wasmtime::Config;
 use wasmtime::Engine;
@@ -16,6 +17,8 @@ use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtx;
 use wasmtime_wasi::WasiCtxView;
 use wasmtime_wasi::WasiView;
+use wasmtime_wasi::DirPerms;
+use wasmtime_wasi::FilePerms;
 
 use wasmtime_wasi::p2::add_to_linker_async;
 
@@ -32,6 +35,10 @@ bindgen!({
   path: "../tools/tool.wit",
   exports: { default: async }
 });
+
+// Shared working directory mounted into the harness and preopened for every
+// tool. Kept in sync with the bind mount in docker-compose.yml.
+const SANDBOX_PATH: &str = "/sandbox";
 
 struct ToolHooks;
 
@@ -51,6 +58,16 @@ impl ToolState {
     builder.inherit_stderr();
     builder.inherit_network();
     builder.allow_ip_name_lookup(true);
+
+    // Grant every tool read/write access to the shared sandbox directory, its
+    // only writable location on the host. Tools use it to persist files and to
+    // hand data to one another across steps.
+    match builder.preopened_dir(SANDBOX_PATH, SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
+      Ok(_) => {},
+      Err(error) => {
+        error!("Unable to preopen the sandbox directory {}: {}", SANDBOX_PATH, error);
+      }
+    };
 
     for (key, value) in vars() {
       match key.strip_prefix("OLIVIA_TOOL_") {

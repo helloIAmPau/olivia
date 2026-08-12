@@ -74,8 +74,8 @@ async fn handle_command(bot: Bot, message: Message, command: Commands, state: Ar
               Some(result) => result,
               None => "The agent finished without producing a result".to_string()
             },
-            AgentPayloadState::Error => match data.message {
-              Some(message) => message,
+            AgentPayloadState::Error => match data.error_message {
+              Some(error_message) => error_message,
               None => "The agent reported an error without a message".to_string()
             },
             AgentPayloadState::Tool => "The agent unexpectedly stopped on a tool step".to_string()

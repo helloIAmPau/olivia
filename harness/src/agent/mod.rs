@@ -3,6 +3,7 @@ pub mod tool_registry;
 pub mod tool;
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::io::Error as IoError;
 use std::fmt::Result as FormatterResult;
 use std::fmt::Formatter;
@@ -21,8 +22,11 @@ use wasmtime::Error as WasmError;
 
 use tracing::debug;
 use tracing::error;
+use tracing::info;
 
 use schemars::JsonSchema;
+
+use uuid::Uuid;
 
 use llm_client::LLMClient;
 use tool_registry::ToolRegistry;
@@ -41,6 +45,7 @@ pub enum AgentError {
   Model(&'static str, String),
   Parsing(ParsingError),
   Completions(ChatRequest, ChatResponse),
+  LLMRequest(u16, String),
   MaxIterations,
   Agent(String),
   Io(IoError),
@@ -61,6 +66,7 @@ impl Display for AgentError {
       AgentError::Parsing(error) => write!(formatter, "Parsing Error - {}", error),
       AgentError::Model(message, model) => write!(formatter, "[{}] Model Error - {}", model, message),
       AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
+      AgentError::LLMRequest(status, body) => write!(formatter, "LLM Request Error - upstream returned HTTP {}: {}", status, body),
       AgentError::MaxIterations => write!(formatter, "Max agentic loop iterations reached. Aborted trigger"),
       AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message),
       AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
@@ -145,7 +151,7 @@ pub struct AgentPayload {
   /// your output if the execution succeded. Required for state = Done, null otherwise
   pub result: Option<String>,
   /// your error message, if any, if the execution failed. Required for state = Error, null otherwise
-  pub message: Option<String>,
+  pub error_message: Option<String>,
   /// the name of the tool to use. Required for state = Tool, null otherwise
   pub name: Option<String>,
   /// a json string rapresenting the tool parameters. Look at the tool section to learn how to set the parameters for each tool. Required for state = Tool, null otherwise.
@@ -158,7 +164,8 @@ pub struct Agent {
   client: LLMClient,
   config: AgentConfig,
   registry: ToolRegistry,
-  store_prompt: String
+  store_prompt: String,
+  sessions: Mutex<HashMap<Uuid, Vec<ChatMessage>>>
 }
 
 impl Agent {
@@ -211,14 +218,16 @@ impl Agent {
       client,
       config,
       registry,
-      store_prompt
+      store_prompt,
+      sessions: Mutex::new(HashMap::new())
     };
 
     return Ok(agent);
   }
 
   pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentPayload, AgentError> {
-    debug!("Agent accepted a new request");
+    let session_id = Uuid::new_v4();
+    debug!("Agent accepted a new request (session {})", session_id);
 
     let context = format!(r#"
 You are OlivIA, a strict AI task coordinator. Your SOLE function is to analyze requests and delegate them to external tools. 
@@ -229,6 +238,7 @@ CRITICAL BEHAVIORAL RULES:
 3. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
 4. CONVERSATIONAL JSON: You possess conversational capabilities, but all dialogue, explanations, updates, and final answers MUST be passed strictly as a string value within the "message" field of your JSON output.
 5. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "description". You must pass the exact "connection_string" and "type" as parameters to the relevant tool to execute the operation. Never leak the store information to the reply (username, password or urls), but always refer to them using their name.
+6. FILESYSTEM SANDBOX: A shared working directory is available to the tools at the absolute path /sandbox. It is the ONLY writable location. When a task needs to persist a file or hand data from one tool to the next, instruct the tools to read and write inside /sandbox using absolute paths (e.g. /sandbox/report.csv). Never assume any path outside /sandbox is writable, and refer to it as "the sandbox" when talking to the user.
 
 EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
 * Tool usage
@@ -267,11 +277,13 @@ AVAILABLE DATA STORES:
         Err(error) => {
           error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
 
-          continue;
+          return Err(error);
         }
       };
 
       payload.push(assistant_chat_message.clone());
+
+      info!("Session {}:\n{:#?}", session_id, payload);
 
       let agent_payload: AgentPayload = match from_str(&assistant_chat_message.content) {
         Ok(agent_payload) => agent_payload,
@@ -304,7 +316,7 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
           "#, error, assistant_chat_message.content);
 
           payload.push(ChatMessage {
-            role: ChatMessageRole::System,
+            role: ChatMessageRole::User,
             content: feedback
           });
 
@@ -314,12 +326,30 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
 
       match agent_payload.state {
         AgentPayloadState::Done => {
+          match self.sessions.lock() {
+            Ok(mut sessions) => {
+              sessions.insert(session_id, payload);
+            },
+            Err(error) => {
+              error!("Unable to lock the sessions store to save {}: {}", session_id, error);
+            }
+          };
+
           return Ok(agent_payload);
         },
         AgentPayloadState::Error => {
-          let message = match agent_payload.message {
+          let message = match agent_payload.error_message {
             Some(message) => message,
             None => "No error message".to_string()
+          };
+
+          match self.sessions.lock() {
+            Ok(mut sessions) => {
+              sessions.insert(session_id, payload);
+            },
+            Err(error) => {
+              error!("Unable to lock the sessions store to save {}: {}", session_id, error);
+            }
           };
 
           return Err(AgentError::Agent(message));
