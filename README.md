@@ -1,4 +1,6 @@
 <div align="center">
+  <img src=".github/cat_spotted_grey_moves.gif" alt="Olivia Harness">
+
   <h1><code>Olivia Harness</code></h1>
 
   <strong>A config-driven harness that runs an LLM as a safe, sandboxed task coordinator</strong>
