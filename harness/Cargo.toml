@@ -16,13 +16,13 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 reqwest = { version = "0.13.4", features = ["json"] }
 
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["macros"] }
 
 teloxide = { version = "0.17.0", features = ["macros"] }
 
 tokio-cron-scheduler = "0.15.1"
 
-uuid = { version = "1.24.0", features = ["v4"] }
+uuid = { version = "1.24.0", features = ["v4", "serde"] }
 
 wasmtime = { version = "47.0.3", features = ["component-model", "async"] }
 wasmtime-wasi = "47.0.3"

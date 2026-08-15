@@ -13,8 +13,6 @@ use serde::Deserialize;
 
 use common::define_tool;
 
-// Shared working directory preopened for every tool; it is the only writable
-// location, so every path this tool touches is resolved inside it.
 const SANDBOX_PATH: &str = "/sandbox";
 
 #[derive(Deserialize, JsonSchema)]
@@ -144,7 +142,6 @@ fn run(input: FsParams) -> ToolOutput {
           };
         },
         FsKind::File => {
-          // Make sure the parent directory exists so nested files can be created.
           match Path::new(&target).parent() {
             Some(parent) => {
               match create_dir_all(parent) {

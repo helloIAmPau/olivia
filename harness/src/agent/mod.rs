@@ -52,6 +52,8 @@ pub enum AgentError {
   InvalidToolInput(String, String, &'static str),
   Tool(String),
   Lock(String),
+  SessionMutex(String),
+  Session(Uuid),
   Wasm(WasmError)
 }
 
@@ -72,6 +74,8 @@ impl Display for AgentError {
       AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
       AgentError::Lock(error) => write!(formatter, "Lock Error - {}", error),
       AgentError::Wasm(error) => write!(formatter, "Wasm Error - {}", error),
+      AgentError::SessionMutex(error) => write!(formatter, "Session Mutex Error - Unable to lock the sessions store: {}", error),
+      AgentError::Session(session_id) => write!(formatter, "Session Error - Invalid session id {}", session_id),
       AgentError::InvalidToolInput(name, params, message) => write!(formatter, "Invalid Tool Input Error - {} {}({})", message, name, params)
     }
   }
@@ -158,6 +162,12 @@ pub struct AgentPayload {
   pub params: Option<String>
 }
 
+#[derive(Serialize)]
+pub struct AgentResult {
+  pub session_id: Uuid,
+  pub payload: AgentPayload
+}
+
 const MAX_ITERATIONS: i32 = 200;
 
 pub struct Agent {
@@ -225,7 +235,7 @@ impl Agent {
     return Ok(agent);
   }
 
-  pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentPayload, AgentError> {
+  pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
     let session_id = Uuid::new_v4();
     debug!("Agent accepted a new request (session {})", session_id);
 
@@ -255,7 +265,6 @@ AVAILABLE DATA STORES:
 {}
     "#, self.registry.prompt, self.store_prompt);
 
-    let mut iteration = 0;
     let mut payload = vec![
       ChatMessage {
         role: ChatMessageRole::System,
@@ -263,6 +272,34 @@ AVAILABLE DATA STORES:
       }
     ];
     payload.extend_from_slice(&request);
+
+    return self.iterate(session_id, payload).await;
+  }
+
+  pub async fn ask(&self, session_id: Uuid, request: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
+    let mut payload = { 
+      let sessions = match self.sessions.lock() {
+        Ok(sessions) => sessions,
+      
+        Err(error) => {
+          return Err(AgentError::SessionMutex(error.to_string()));
+        }
+      };
+
+      match sessions.get(&session_id) {
+        Some(payload) => payload.clone(),
+        None => {
+          return Err(AgentError::Session(session_id));
+        }
+      }
+    };
+    payload.extend_from_slice(&request);
+
+    return self.iterate(session_id, payload).await;
+  }
+
+  async fn iterate(&self, session_id: Uuid, mut payload: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
+    let mut iteration = 0;
 
     loop {
       if iteration >= MAX_ITERATIONS {
@@ -327,7 +364,7 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
       match agent_payload.state {
         AgentPayloadState::Done => {
           match self.sessions.lock() {
-            Ok(mut sessions) => {
+            Ok(mut sessions) => { 
               sessions.insert(session_id, payload);
             },
             Err(error) => {
@@ -335,21 +372,15 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
             }
           };
 
-          return Ok(agent_payload);
+          return Ok(AgentResult {
+            payload: agent_payload,
+            session_id
+          });
         },
         AgentPayloadState::Error => {
           let message = match agent_payload.error_message {
             Some(message) => message,
             None => "No error message".to_string()
-          };
-
-          match self.sessions.lock() {
-            Ok(mut sessions) => {
-              sessions.insert(session_id, payload);
-            },
-            Err(error) => {
-              error!("Unable to lock the sessions store to save {}: {}", session_id, error);
-            }
           };
 
           return Err(AgentError::Agent(message));
@@ -434,4 +465,5 @@ Respond immediately with your next JSON action.
       }
     }
   }
+
 }

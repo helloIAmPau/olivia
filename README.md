@@ -87,8 +87,9 @@ Supporting pieces:
 - **The sandbox directory** — a shared `/sandbox` folder is mounted into the
   harness and preopened for every tool, so tools can persist files and hand data
   to one another across steps.
-- **Sessions** — when a run ends (`done`/`error`) the agent stores its full
-  message chain under a generated UUID, so a conversation can be reloaded later.
+- **Sessions** — every run is tagged with a UUID. When a run completes
+  (`done`), the agent saves its full message chain under that id, so a caller can
+  resume the same conversation on a later request. See [Sessions](#sessions).
 
 ### WIT as the tool contract
 
@@ -146,6 +147,50 @@ Each tool file is loaded as a `wasmtime::component::Component`; for every call
 the harness instantiates it into a **fresh, sandboxed `Store`**, so tools
 accumulate no state across invocations. The runtime is async, so tool calls
 never block the request loop.
+
+## Sessions
+
+Tools are stateless, but a *conversation* is not: a caller often needs to send a
+follow-up that builds on what the agent already did. Sessions carry that
+context.
+
+Every run is identified by a **session id** (a UUID). Two entry points on the
+agent decide whether a run starts fresh or continues an existing one:
+
+- **`accept(request)`** mints a new UUID, prepends the router system prompt, and
+  runs the agentic loop from scratch.
+- **`ask(session_id, request)`** looks up a stored message chain by id, appends
+  the new messages to it, and continues the loop with the full history.
+
+When a run finishes with `done`, the agent stores its complete message chain
+(system prompt, every model turn, and every tool result) under the session id
+before returning. A later `ask` for that id replays the whole exchange, so the
+model sees everything that happened. Runs that end in `error` are **not** saved,
+and the store is an in-memory map — sessions do not survive a harness restart.
+
+Every reply carries the id back to the caller:
+
+```json
+{
+  "session_id": "b1f7c0de-1234-4a5b-9c8d-0f1e2d3c4b5a",
+  "payload": { "state": "done", "result": "…" }
+}
+```
+
+Each service exposes this differently:
+
+- **HTTP** — the response is `{ "error": …, "data": { "session_id", "payload" } }`.
+  To continue a conversation, send the id back on the next request in the
+  `OLIVIA_SESSION_ID` header; the harness parses it, restores the session, and
+  calls `ask`. A request with no (or an unparseable) header starts a fresh
+  session via `accept`; a well-formed id that isn't in the store returns an
+  `Invalid session id` error.
+- **Telegram** — `/do <text>` starts a session and the bot remembers it per
+  chat, so any **plain follow-up message** continues that conversation
+  automatically. Messaging before you have run `/do` replies with `Unable to
+  restore session`.
+- **cron** — each tick is a standalone `accept`; there is no caller to hand the
+  id to, so cron runs are effectively single-shot.
 
 ## Configuration
 
@@ -221,11 +266,15 @@ forwards its connection details to the matching tool (`postgres_client` /
 
 - **`http`** — `port` (default `80`), `address` (default `0.0.0.0`), and one or
   more `[services.<name>.endpoints.<ep>]` with `path` (default `/`), `method`
-  (`GET`/`POST`/`PUT`/`DELETE`, default `GET`) and `prompt`. Each endpoint
-  responds with a JSON envelope; the request body is forwarded to the agent.
+  (`GET`/`POST`/`PUT`/`DELETE`, default `GET`) and `prompt`. The request body is
+  forwarded to the agent; each endpoint replies with a JSON envelope carrying the
+  `session_id` and the agent's `payload`. Pass a prior id back in the
+  `OLIVIA_SESSION_ID` header to continue that conversation — see
+  [Sessions](#sessions).
 - **`telegram`** — `token` (from [@BotFather](https://t.me/BotFather)) and
-  `prompt`. Answers `/help` and `/do <text>` (runs `<text>` through the agent);
-  plain messages are logged.
+  `prompt`. Answers `/help` and `/do <text>` (starts a run through the agent);
+  plain follow-up messages continue the chat's session — see
+  [Sessions](#sessions).
 - **`cron`** — `schedule` (a 6-field, seconds-precision cron expression via
   [`tokio-cron-scheduler`](https://docs.rs/tokio-cron-scheduler)) and `prompt`.
   On every tick it runs the agent with the prompt; there is no caller, so the
@@ -240,6 +289,7 @@ forwards its connection details to the matching tool (`postgres_client` /
 | `web_search` | `tools/search/` | `{ "query": … }` | Searches the web via a [SearXNG](https://docs.searxng.org/) instance and returns the JSON results. |
 | `web` | `tools/web/` | `{ "code": … }` | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (stealth mode on): runs a Puppeteer function you supply and returns its output. |
 | `download` | `tools/download/` | `{ "code": …, "filename": … }` | Triggers a browser download through Browserless `/download` and writes the file's bytes to `/sandbox/<filename>`. The `code` must fire a real download (click a link / click an `<a download>`) — `page.goto(fileUrl)` alone does not download. |
+| `fs` | `tools/fs/` | `{ "operation": …, "path": …, "kind": …, "content": … }` | Manages files and directories inside `/sandbox`. `operation` ∈ `list` (entries of `path`, each prefixed `dir `/`file`) / `create` (a `file` or `directory` per `kind`, writing optional `content` and any missing parents) / `delete` (recursive for directories). Paths are relative to `/sandbox`, may not contain `..`, and cannot escape it. |
 | `postgres_client` | `tools/postgres/` | `{ "connection_string": …, "query": … }` | Runs one SQL statement against a PostgreSQL store and returns the result as CSV. Speaks the v3 wire protocol directly over `std::net`. |
 | `clickhouse_client` | `tools/clickhouse/` | `{ "host": …, "username": …, "password": …, "query": … }` | Runs one SQL statement against a ClickHouse store over its HTTP interface and returns a `SELECT` as CSV (`default_format=CSVWithNames`). |
 | `s3_client` | `tools/s3/` | `{ "bucket": …, "region": …, "endpoint": …, "access_key": …, "secret_key": …, "operation": …, "key": …, "filename": … }` | Manages files in an S3-compatible store (SigV4 via [`rusty-s3`](https://docs.rs/rusty-s3)). `operation` ∈ `list` / `create` (upload `/sandbox/<filename>` to `key`) / `delete` / `download` (save `key` to `/sandbox/<filename>`). |

@@ -17,15 +17,20 @@ use axum::routing::get;
 use axum::routing::post;
 use axum::routing::put;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::serve;
 use axum::Json;
+
+use uuid::Uuid;
 
 use crate::services::ServiceError;
 use crate::services::ServiceState;
 use crate::agent::Agent;
+use crate::agent::AgentResult;
 use crate::agent::llm_client::ChatMessage;
 use crate::agent::llm_client::ChatMessageRole;
-use crate::agent::AgentPayload;
+
+const SESSION_HEADER: &str = "OLIVIA_SESSION_ID";
 
 #[derive(Deserialize)]
 pub enum HttpMethod {
@@ -85,13 +90,15 @@ fn default_address() -> String {
 }
 
 #[derive(Serialize)]
-struct AgentResult {
+struct HttpAgentResult {
   error: Option<String>,
-  data: Option<AgentPayload>
+  data: Option<AgentResult>
 }
 
-async fn http_handler(State(state): State<Arc<ServiceState<HttpEndpointConfig>>>, payload: String) -> Json<AgentResult> {
+#[axum::debug_handler]
+async fn http_handler(State(state): State<Arc<ServiceState<HttpEndpointConfig>>>, headers: HeaderMap, payload: String) -> Json<HttpAgentResult> {
   info!("Activating {} endpoint via {} HTTP request on {}", state.name, state.config.method, state.config.path);
+
   let mut system_prompt = format!(r#"
 The user activated the HTTP endpopint named {}.
 The endpoint is defined to respond to {} requests on {}.
@@ -117,18 +124,59 @@ The request contains a payload as well:
     }
   ]; 
 
-  let result = match state.agent.accept(request).await {
-    Ok(data) => AgentResult {
-      error: None,
-      data: Some(data)
+  let result = match headers.get(SESSION_HEADER) {
+    Some(value) => {
+      let raw = match value.to_str() {
+        Ok(raw) => {
+          info!("Found raw session header: {}", raw);
+
+          raw
+        },
+        Err(error) => {
+          return Json(HttpAgentResult {
+            error: Some(format!("Invalid {} header: {}", SESSION_HEADER, error)),
+            data: None
+          });
+        }
+      };
+
+      let session_id = match Uuid::parse_str(raw) {
+        Ok(session_id) => {
+          info!("Session {} is a valid session id", session_id);
+
+          session_id
+        },
+        Err(error) => {
+          return Json(HttpAgentResult {
+            error: Some(format!("Invalid {} header: {}", SESSION_HEADER, error)),
+            data: None
+          });
+        }
+      };
+
+      state.agent.ask(session_id, request).await
     },
-    Err(error) => AgentResult {
-      error: Some(error.to_string()),
-      data: None
+    None => {
+      info!("Creating new session for request");
+
+      state.agent.accept(request).await
     }
   };
 
-  return Json(result);
+  match result {
+    Ok(data) => {
+      return Json(HttpAgentResult {
+        error: None,
+        data: Some(data)
+      });
+    },
+    Err(error) => {
+      return Json(HttpAgentResult {
+        error: Some(error.to_string()),
+        data: None
+      });
+    }
+  };
 }
 
 pub async fn init_http(name: String, config: HttpConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
