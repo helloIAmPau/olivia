@@ -513,6 +513,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs"
+version = "0.0.0"
+dependencies = [
+ "common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.60.0",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,16 @@
+[package]
+name = "fs"
+version = "0.0.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+common = { path = "../common" }
+
+wit-bindgen = "0.60.0"
+
+schemars = "1.2.2"
+serde_json = "1.0.151"
+serde = { version = "1.0.229", features = ["derive"] }
