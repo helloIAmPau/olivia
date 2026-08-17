@@ -181,7 +181,7 @@ Each service exposes this differently:
 
 - **HTTP** — the response is `{ "error": …, "data": { "session_id", "payload" } }`.
   To continue a conversation, send the id back on the next request in the
-  `OLIVIA_SESSION_ID` header; the harness parses it, restores the session, and
+  `OLIVIA-SESSION-ID` header; the harness parses it, restores the session, and
   calls `ask`. A request with no (or an unparseable) header starts a fresh
   session via `accept`; a well-formed id that isn't in the store returns an
   `Invalid session id` error.
@@ -269,7 +269,7 @@ forwards its connection details to the matching tool (`postgres_client` /
   (`GET`/`POST`/`PUT`/`DELETE`, default `GET`) and `prompt`. The request body is
   forwarded to the agent; each endpoint replies with a JSON envelope carrying the
   `session_id` and the agent's `payload`. Pass a prior id back in the
-  `OLIVIA_SESSION_ID` header to continue that conversation — see
+  `OLIVIA-SESSION-ID` header to continue that conversation — see
   [Sessions](#sessions).
 - **`telegram`** — `token` (from [@BotFather](https://t.me/BotFather)) and
   `prompt`. Answers `/help` and `/do <text>` (starts a run through the agent);

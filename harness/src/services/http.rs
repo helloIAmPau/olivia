@@ -30,7 +30,7 @@ use crate::agent::AgentResult;
 use crate::agent::llm_client::ChatMessage;
 use crate::agent::llm_client::ChatMessageRole;
 
-const SESSION_HEADER: &str = "OLIVIA_SESSION_ID";
+const SESSION_HEADER: &str = "OLIVIA-SESSION-ID";
 
 #[derive(Deserialize)]
 pub enum HttpMethod {
