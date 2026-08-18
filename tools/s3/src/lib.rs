@@ -192,7 +192,9 @@ fn run(input: S3ClientParams) -> ToolOutput {
       let action = bucket.put_object(Some(&credentials), &key);
       let url = action.sign(EXPIRES);
 
-      let response = match Client::new().put(url.as_str()).body(content).send() {
+      let length = content.len();
+
+      let response = match Client::new().put(url.as_str()).header("Content-Length", length.to_string()).body(content).send() {
         Ok(response) => response,
         Err(error) => {
           return ToolOutput {
