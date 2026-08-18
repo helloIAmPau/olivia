@@ -137,16 +137,36 @@ world can be a tool — see [Implementing a tool](#implementing-a-tool).
 The harness (`harness/`) is an async Rust service built on
 [wasmtime](https://wasmtime.dev/). At startup it:
 
-1. loads `/config.toml` (agent + services);
+1. loads the config file (`/config.toml` by default, override with
+   `--config=<path>`) — agent + services;
 2. verifies the configured `model` is registered on the LiteLLM proxy, refusing
    to start otherwise;
-3. loads every `*.wasm` from `/tools`, calling each tool's `info()` to build the
-   registry and the tool catalogue injected into the system prompt.
+3. loads every `*.wasm` from the tools folder (`/tools` by default, override with
+   `--tools=<folder>`), calling each tool's `info()` to build the registry and
+   the tool catalogue injected into the system prompt.
 
 Each tool file is loaded as a `wasmtime::component::Component`; for every call
 the harness instantiates it into a **fresh, sandboxed `Store`**, so tools
 accumulate no state across invocations. The runtime is async, so tool calls
 never block the request loop.
+
+### Command-line options
+
+Both startup paths default to the container mount points and can be pointed
+elsewhere. Options are accepted only in `--key=value` form:
+
+| Option | Default | Description |
+| ------ | ------- | ----------- |
+| `--config=<path>` | `/config.toml` | The TOML config file to load. |
+| `--tools=<folder>` | `/tools` | The folder scanned for `*.wasm` tools. |
+
+```sh
+harness --config=/examples/hello.toml --tools=/tools
+```
+
+Bundled example configs live in `examples/` (mounted read-only into the harness
+at `/examples`); `examples/hello.toml` exposes a single HTTP endpoint that
+greets a posted name.
 
 ## Sessions
 
@@ -194,7 +214,8 @@ Each service exposes this differently:
 
 ## Configuration
 
-The harness loads its configuration from `/config.toml`:
+The harness loads its configuration from `/config.toml` (override with
+`--config=<path>`):
 
 ```toml
 [agent]
