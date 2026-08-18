@@ -1,11 +1,14 @@
 const DEFAULT_CONFIG_PATH: &str = "/config.toml";
+const DEFAULT_TOOLS_FOLDER: &str = "/tools";
 
 pub struct CliOptions {
-  pub config_path: String
+  pub config_path: String,
+  pub tools_folder: String
 }
 
 pub fn resolve() -> CliOptions {
   let mut config_path = DEFAULT_CONFIG_PATH.to_string();
+  let mut tools_folder = DEFAULT_TOOLS_FOLDER.to_string();
 
   let mut args = std::env::args();
 
@@ -30,11 +33,13 @@ pub fn resolve() -> CliOptions {
 
     match key {
       "config" => config_path = value.to_string(),
+      "tools" => tools_folder = value.to_string(),
       _ => panic!("Unknown option '--{}'", key)
     };
   }
 
   return CliOptions {
-    config_path
+    config_path,
+    tools_folder
   };
 }

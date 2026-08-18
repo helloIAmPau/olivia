@@ -30,7 +30,7 @@ async fn main() {
     }
   };
 
-  let agent = match Agent::new(config.agent).await {
+  let agent = match Agent::new(config.agent, &options.tools_folder).await {
     Ok(agent) => agent,
     Err(error) => {
       panic!("{}", error);

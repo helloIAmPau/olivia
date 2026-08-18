@@ -184,7 +184,7 @@ pub struct Agent {
 }
 
 impl Agent {
-  pub async fn new(config: AgentConfig) -> Result<Self, AgentError> {
+  pub async fn new(config: AgentConfig, tools_folder: &str) -> Result<Self, AgentError> {
     let client = match LLMClient::new() {
       Ok(client) => client,
       Err(error) => {
@@ -207,7 +207,7 @@ impl Agent {
 
     debug!("Model {} found", config.model);
 
-    let registry = match ToolRegistry::new().await {
+    let registry = match ToolRegistry::new(tools_folder).await {
       Ok(registry) => registry,
       Err(error) => {
         return Err(error);

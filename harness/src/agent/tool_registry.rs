@@ -17,8 +17,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-  pub async fn new() -> Result<Self, AgentError> {
-    let tools_folder = "/tools";
+  pub async fn new(tools_folder: &str) -> Result<Self, AgentError> {
     info!("Loading tools from folder {}", tools_folder);
     let mut tools = HashMap::new();
     let mut prompt = "".to_string();
