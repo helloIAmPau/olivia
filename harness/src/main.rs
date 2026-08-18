@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod config;
 pub mod services;
 pub mod agent;
@@ -5,6 +6,7 @@ pub mod agent;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+use cli::resolve;
 use config::Config;
 use agent::Agent;
 use services::init;
@@ -19,7 +21,9 @@ async fn main() {
 
   info!("Welcome to Olivia Harness");
 
-  let config = match Config::load().await {
+  let options = resolve();
+
+  let config = match Config::load(&options.config_path).await {
     Ok(config) => config,
     Err(error) => {
       panic!("{}", error);

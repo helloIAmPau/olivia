@@ -37,8 +37,7 @@ pub struct Config {
 }
 
 impl Config {
-  pub async fn load() -> Result<Self, ConfigError> {
-    let config_path = "/config.toml";
+  pub async fn load(config_path: &str) -> Result<Self, ConfigError> {
     info!("Loading config file in {}", config_path);
 
     let plain_config = match read_to_string(config_path).await {

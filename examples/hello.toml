@@ -1,0 +1,22 @@
+# Hello example
+#
+# Minimal HTTP service: POST a name to /hello and the agent replies "Hello <name>".
+#
+# Run (dev compose):
+#   harness --config=/examples/hello.toml
+# Then, from the host (compose maps harness port 9000):
+#   curl -X POST http://localhost:9000/hello -d 'Ada'
+#   -> {"error":null,"data":{ ... "Hello Ada" ... }}
+
+[agent]
+model = "anthropic/claude-sonnet-5"
+prompt = "You are a greeter. Reply with a greeting."
+
+[services.hello]
+type = "http"
+port = 9000
+
+[services.hello.endpoints.greet]
+method = "post"
+path = "/hello"
+prompt = "The request payload is a person's name. Reply with exactly 'Hello <name>', substituting the name from the payload."

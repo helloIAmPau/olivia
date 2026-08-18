@@ -32,6 +32,7 @@ services:
       - '.:/source'
       - './data/tools:/tools:ro'
       - './data/olivia/sandbox:/sandbox'
+      - './examples:/examples:ro'
   tools-builder:
     image: 'olivia/tools:${VERSION:-0.0.0}-next'
     restart: 'always'
