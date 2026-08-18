@@ -4,7 +4,9 @@ SHELL := /bin/bash
 VERSION := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)
 export VERSION
 
-MANIFESTS := harness/Cargo.toml tools/common/Cargo.toml tools/exec/Cargo.toml
+# harness plus every tool crate discovered on disk (each tool is a
+# `tools/<name>/Cargo.toml`; the `tools/Cargo.toml` workspace root is excluded).
+MANIFESTS := harness/Cargo.toml $(wildcard tools/*/Cargo.toml)
 
 all:
 
