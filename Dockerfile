@@ -31,6 +31,8 @@ cmd cargo watch -w . -w /tools -x 'run'
 
 from debian:stable-slim
 
+run apt update && apt install libssl3 ca-certificates
+
 copy --from=tools /tools /tools
 copy --from=builder /source/harness/target/release/harness /harness
 
