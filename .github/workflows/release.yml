@@ -1,0 +1,56 @@
+name: release
+
+# Build and publish the harness image on every version tag (e.g. `v1.2.3`,
+# as produced by `make bump`).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history + tags so the Makefile's `git describe --tags` resolves
+          # to the tag rather than a short SHA.
+          fetch-depth: 0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve version and image name
+        id: meta
+        run: |
+          set -euo pipefail
+          # Same value the Makefile derives, so the local tag matches.
+          version="$(git describe --tags --exact-match)"
+          # ghcr repositories must be lowercase; publish as `<owner>/olivia`.
+          image="ghcr.io/${GITHUB_REPOSITORY}"
+          image="${image,,}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+      - name: Build harness image
+        # `make build` reads VERSION automatically from the git tag and produces
+        # the local image `olivia/harness:$(VERSION)`.
+        run: make build
+
+      - name: Tag and push to ghcr
+        run: |
+          set -euo pipefail
+          local_tag="olivia/harness:${{ steps.meta.outputs.version }}"
+          docker tag "$local_tag" "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
+          docker tag "$local_tag" "${{ steps.meta.outputs.image }}:latest"
+          docker push "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}"
+          docker push "${{ steps.meta.outputs.image }}:latest"
