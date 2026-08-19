@@ -123,5 +123,6 @@ define_tool!(
   Download,
   DownloadParams,
   "Downloads a file through the browserless /download API and saves it into the /sandbox directory. Provide the body of a JavaScript module that default-exports an async function receiving { page } (a Puppeteer Page) plus the filename to save it under in /sandbox. The function MUST trigger a real browser download event — click an existing download link, or create an anchor with a `download` attribute and click it — because a plain page.goto(fileUrl) does NOT download (Chrome renders PDFs/images inline). Browserless captures whatever file the page downloads and this tool writes its bytes to /sandbox/<filename>, returning the saved path. Use it to fetch documents, images, PDFs or other binary files — especially ones behind JavaScript, forms or auth — so other tools can read them from the sandbox afterwards.",
+  vec![Permission::Network, Permission::FileSystem],
   run
 );

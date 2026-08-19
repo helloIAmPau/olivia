@@ -20,5 +20,6 @@ define_tool!(
   HelloTool,
   HelloParams,
   "A simple hello-world tool returning hello + a string received as argument",
+  vec![],
   run
 );

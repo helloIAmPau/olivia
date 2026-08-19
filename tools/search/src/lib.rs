@@ -55,5 +55,6 @@ define_tool!(
   WebSearch,
   SearchParams,
   "Searches the internet for a query and returns the top results as title, url and description. Use it whenever you need fresh or external information you do not already know.",
+  vec![Permission::Network],
   run
 );

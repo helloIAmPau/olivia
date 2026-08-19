@@ -1,10 +1,16 @@
 package olivia:tools;
 
 world tool-world {
+  enum permission {
+    network,
+    file-system
+  }
+
   record tool-info {
     name: string,
     description: string,
-    schema: string
+    schema: string,
+    permissions: list<permission>
   }
 
   enum tool-output-state {
