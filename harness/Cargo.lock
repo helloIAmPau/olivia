@@ -1128,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "axum",
  "reqwest 0.13.4",

@@ -36,8 +36,6 @@ bindgen!({
   exports: { default: async }
 });
 
-// Shared working directory mounted into the harness and preopened for every
-// tool. Kept in sync with the bind mount in docker-compose.yml.
 const SANDBOX_PATH: &str = "/sandbox";
 
 struct ToolHooks;
@@ -52,22 +50,27 @@ struct ToolState {
 }
 
 impl ToolState {
-  fn new() -> Self {
+  fn new(permissions: Vec<Permission>) -> Self {
     let mut builder = WasiCtx::builder();
     builder.inherit_stdout();
     builder.inherit_stderr();
-    builder.inherit_network();
-    builder.allow_ip_name_lookup(true);
 
-    // Grant every tool read/write access to the shared sandbox directory, its
-    // only writable location on the host. Tools use it to persist files and to
-    // hand data to one another across steps.
-    match builder.preopened_dir(SANDBOX_PATH, SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
-      Ok(_) => {},
-      Err(error) => {
-        error!("Unable to preopen the sandbox directory {}: {}", SANDBOX_PATH, error);
+    for permission in &permissions {
+      match permission {
+        Permission::Network => {
+          builder.inherit_network();
+          builder.allow_ip_name_lookup(true);
+        }
+        Permission::FileSystem => {
+          match builder.preopened_dir(SANDBOX_PATH, SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
+            Ok(_) => {},
+            Err(error) => {
+              error!("Unable to preopen the sandbox directory {}: {}", SANDBOX_PATH, error);
+            }
+          };
+        }
       }
-    };
+    }
 
     for (key, value) in vars() {
       match key.strip_prefix("OLIVIA_TOOL_") {
@@ -150,11 +153,12 @@ impl ToolEngine {
 
 pub struct Tool {
   component: Component,
-  engine: Arc<ToolEngine>
+  engine: Arc<ToolEngine>,
+  pub info: ToolInfo
 }
 
 impl Tool {
-  pub fn new(path: PathBuf, engine: Arc<ToolEngine>) -> Result<Self, AgentError> {
+  pub async fn new(path: PathBuf, engine: Arc<ToolEngine>) -> Result<Self, AgentError> {
     let component = match Component::from_file(&engine.wasm, path) {
       Ok(component) => component,
       Err(error) => {
@@ -162,51 +166,49 @@ impl Tool {
       }
     };
 
+    let info = match Tool::bindings(vec![], engine.clone(), &component, async |bindings, store| {
+      return bindings.call_info(store).await;
+    }).await {
+      Ok(info) => info,
+      Err(error) => {
+        return Err(error);
+      }
+    };
+
     return Ok(Self {
       component,
-      engine
+      engine,
+      info
     });
   }
 
-  pub async fn info(&self) -> Result<ToolInfo, AgentError> {
-    let state = ToolState::new();
-    let mut store = Store::new(&self.engine.wasm, state);
-
-    let bindings = match ToolWorld::instantiate_async(&mut store, &self.component, &self.engine.linker).await {
-      Ok(bindings) => bindings,
-      Err(error) => {
-        return Err(AgentError::Wasm(error));
-      }
-    };
-
-    let info = match bindings.call_info(&mut store).await {
-      Ok(info) => info,
-      Err(error) => {
-        return Err(AgentError::Wasm(error));
-      }
-    };
-
-    return Ok(info);
-  }
-
   pub async fn run(&self, params: String) -> Result<ToolOutput, AgentError> {
-    let state = ToolState::new();
-    let mut store = Store::new(&self.engine.wasm, state);
-
-    let bindings = match ToolWorld::instantiate_async(&mut store, &self.component, &self.engine.linker).await {
-      Ok(bindings) => bindings,
-      Err(error) => {
-        return Err(AgentError::Wasm(error));
-      }
-    };
-
-    let result = match bindings.call_run(&mut store, &params).await {
+    let result = match Tool::bindings(self.info.permissions.clone(), self.engine.clone(), &self.component, async |bindings, store| {
+      return bindings.call_run(store, &params).await;
+    }).await {
       Ok(result) => result,
       Err(error) => {
-        return Err(AgentError::Wasm(error));
+        return Err(error);
       }
     };
 
     return Ok(result);
+  }
+
+  async fn bindings<T>(permissions: Vec<Permission>, engine: Arc<ToolEngine>, component: &Component, call: impl AsyncFnOnce(ToolWorld, &mut Store<ToolState>) -> wasmtime::Result<T>) -> Result<T, AgentError> {
+    let state = ToolState::new(permissions);
+    let mut store = Store::new(&engine.wasm, state);
+
+    let bindings = match ToolWorld::instantiate_async(&mut store, component, &engine.linker).await {
+      Ok(bindings) => bindings,
+      Err(error) => {
+        return Err(AgentError::Wasm(error));
+      }
+    };
+
+    match call(bindings, &mut store).await {
+      Ok(value) => Ok(value),
+      Err(error) => Err(AgentError::Wasm(error))
+    }
   }
 }

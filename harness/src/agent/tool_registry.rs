@@ -58,23 +58,16 @@ impl ToolRegistry {
       }
 
       info!("Loading tool {}", tool_path.display());
-      let tool = match Tool::new(tool_path, engine_arc.clone()) {
+      let tool = match Tool::new(tool_path, engine_arc.clone()).await {
         Ok(tool) => tool,
         Err(error) => {
           return Err(error);
         }
       };
 
-      let info = match tool.info().await {
-        Ok(info) => info,
-        Err(error) => {
-          return Err(error);
-        }
-      };
-
-      info!("{:#?}", info);
-      prompt = format!("{}\nname: {}\ndescription: {}\ninput schema: {}\n", prompt, info.name, info.description, info.schema);
-      tools.insert(info.name, tool);
+      info!("{:#?}", tool.info);
+      prompt = format!("{}\nname: {}\ndescription: {}\ninput schema: {}\n", prompt, tool.info.name, tool.info.description, tool.info.schema);
+      tools.insert(tool.info.name.clone(), tool);
     }
 
     return Ok(ToolRegistry {
