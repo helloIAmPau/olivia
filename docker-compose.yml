@@ -11,6 +11,10 @@ services:
       - 'RUST_BACKTRACE=1'
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
       - 'OLIVIA_TOOL_BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN}'
+      - 'OLIVIA_TOOL_LITELLM_HOST=http://litellm:4000'
+      - 'OLIVIA_TOOL_LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
+      - 'OLIVIA_TOOL_EMBED_MODEL=nomic-embed-text'
+      - 'OLIVIA_TOOL_EXTRACT_MODEL=anthropic/claude-sonnet-5'
     configs:
       - source: 'test'
         target: '/config.toml'
@@ -29,6 +33,8 @@ services:
         condition: 'service_healthy'
       rustfs:
         condition: 'service_healthy'
+      qdrant:
+        condition: 'service_started'
     volumes:
       - '.:/source'
       - './data/olivia/tools:/tools:ro'
@@ -202,6 +208,13 @@ services:
       retries: 5
       start_period: '30s'
       start_interval: '3s'
+  qdrant:
+    image: 'qdrant/qdrant:v1.12.4'
+    restart: 'always'
+    volumes:
+      - './data/qdrant:/qdrant/storage'
+    networks:
+      - 'backend'
 
 networks:
   backend:
@@ -245,6 +258,10 @@ configs:
         - model_name: 'ollama/gemma4'
           litellm_params:
             model: 'ollama/gemma4:12b'
+            api_base: 'http://ollama:11434'
+        - model_name: 'nomic-embed-text'
+          litellm_params:
+            model: 'ollama/nomic-embed-text'
             api_base: 'http://ollama:11434'
   test:
 #      [services.test_cron]

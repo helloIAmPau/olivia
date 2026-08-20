@@ -242,7 +242,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "waki",
  "wit-bindgen 0.60.0",
 ]
 
@@ -271,7 +270,14 @@ checksum = "2550f75b8cfac212855f6b1885455df8eaee8fe8e246b647d69146142e016084"
 name = "common"
 version = "0.0.1"
 dependencies = [
+ "bytes",
+ "fallible-iterator",
  "paste",
+ "postgres-protocol",
+ "serde",
+ "serde_json",
+ "url",
+ "waki",
 ]
 
 [[package]]
@@ -433,6 +439,18 @@ name = "either"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
+
+[[package]]
+name = "embed"
+version = "0.0.1"
+dependencies = [
+ "base64 0.22.1",
+ "common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.60.0",
+]
 
 [[package]]
 name = "endian-type"
@@ -1486,14 +1504,10 @@ dependencies = [
 name = "postgres"
 version = "0.0.1"
 dependencies = [
- "bytes",
  "common",
- "fallible-iterator",
- "postgres-protocol",
  "schemars",
  "serde",
  "serde_json",
- "url",
  "wit-bindgen 0.60.0",
 ]
 
@@ -1748,6 +1762,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "retrieve"
+version = "0.0.1"
+dependencies = [
+ "common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.60.0",
 ]
 
 [[package]]

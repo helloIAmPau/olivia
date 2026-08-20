@@ -1,0 +1,62 @@
+# RAG example
+#
+# A Retrieval-Augmented Generation pipeline fed from an S3 bucket and queried
+# over Telegram.
+#
+#   - an S3 store (`assets`) holds the source documents;
+#   - a Qdrant store (`knowledge`) is the vector memory;
+#   - a cron service runs every 3 hours: it downloads every object in the
+#     `assets` bucket into /sandbox and calls the `embed` tool, which extracts
+#     each file's text with the extraction model, chunks and embeds it, and
+#     upserts it into the collection;
+#   - a Telegram bot answers questions: it calls the `retrieve` tool to fetch
+#     the most relevant chunks and composes an answer grounded in them.
+#
+# Requirements (see docker-compose.yml):
+#   - a `qdrant` service (http://qdrant:6333) and an S3-compatible store (rustfs);
+#   - an embedding model in LiteLLM (`nomic-embed-text`, served by Ollama —
+#     `ollama pull nomic-embed-text`) and a vision/document chat model for
+#     extraction (`anthropic/claude-sonnet-5`);
+#   - the harness forwards LITELLM_HOST / LITELLM_MASTER_KEY / EMBED_MODEL /
+#     EXTRACT_MODEL to the tools via the OLIVIA_TOOL_* environment variables.
+#
+# Run (dev compose): harness --config=/examples/rag.toml
+# Upload documents to the `assets` bucket, wait for a cron tick (or restart to
+# trigger one), then message the bot: /do What is the refund policy?
+
+[agent]
+model = "anthropic/claude-sonnet-5"
+prompt = "You are a retrieval-augmented assistant. You answer questions strictly from documents indexed into the knowledge base, never from your own prior knowledge."
+
+# ── Source documents ──
+
+[agent.stores.assets]
+type = "s3"
+bucket = "assets"
+region = "us-east-1"
+endpoint = "http://rustfs:9000"
+access_key = "${RUSTFS_ACCESS_KEY}"
+secret_key = "${RUSTFS_SECRET_KEY}"
+prompt = "S3 bucket holding the raw source documents to index. List it and download its objects into the sandbox before embedding them."
+
+# ── Vector memory ──
+
+[agent.stores.knowledge]
+type = "qdrant"
+endpoint = "http://qdrant:6333"
+collection = "documents"
+prompt = "Vector database holding the embedded document chunks. Use the embed tool to index a sandbox folder of files into it and the retrieve tool to find the chunks most relevant to a question."
+
+# ── Ingestion: refresh the knowledge base every 3 hours ──
+
+[services.indexer]
+type = "cron"
+schedule = "0 0 */3 * * *"
+prompt = "Refresh the knowledge base from the assets bucket. First list the objects in the assets S3 store, then download every object into the /sandbox directory (name each sandbox file after the object's key). Once all objects are downloaded, call the embed tool once with the knowledge store's endpoint and collection and the folder '.' (the sandbox root) to index them. Report how many files and chunks were indexed."
+
+# ── Questions: ask the knowledge base over Telegram ──
+
+[services.bot]
+type = "telegram"
+token = "${OLIVIA_TELEGRAM_TOKEN}"
+prompt = "You received a question on Telegram. Call the retrieve tool with the knowledge store's endpoint and collection and the user's question to fetch the most relevant document chunks, then answer using ONLY that context and cite the source file names you relied on. If the retrieved context does not contain the answer, say you could not find it in the indexed documents rather than guessing."

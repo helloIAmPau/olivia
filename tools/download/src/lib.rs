@@ -6,9 +6,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-use waki::Client;
-
 use common::define_tool;
+use common::http::HttpClient;
 
 // Shared working directory preopened for every tool; downloads are saved here.
 const SANDBOX_PATH: &str = "/sandbox";
@@ -62,12 +61,17 @@ fn run(input: DownloadParams) -> ToolOutput {
     };
   }
 
-  let endpoint = format!("{}/download", host);
   let payload = FunctionRequest {
     code: input.code
   };
 
-  let response = match Client::new().post(endpoint.as_str()).query([("token", token), ("launch", "{\"stealth\":true}".to_string())]).json(&payload).send() {
+  let client = HttpClient::new(host.as_str());
+  let query: Vec<(&str, &str)> = vec![
+    ("token", token.as_str()),
+    ("launch", "{\"stealth\":true}")
+  ];
+
+  let response = match client.post("/download", vec![], query, Some(&payload)) {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {
@@ -77,33 +81,20 @@ fn run(input: DownloadParams) -> ToolOutput {
     }
   };
 
-  let status = response.status_code();
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Could not read the browserless response: {}", error)
-      };
-    }
-  };
-
-  if status < 200 || status >= 300 {
-    let body = String::from_utf8_lossy(&bytes).into_owned();
-
+  if response.is_success() == false {
     return ToolOutput {
       state: ToolOutputState::Error,
-      content: format!("browserless /download returned status {}: {}", status, body)
+      content: format!("browserless /download returned status {}: {}", response.status, response.text())
     };
   }
 
   let path = format!("{}/{}", SANDBOX_PATH, input.filename);
+  let bytes = response.bytes();
   let size = bytes.len();
 
   println!("[download] Saving {} bytes to {}", size, path);
 
-  match write(&path, &bytes) {
+  match write(&path, bytes) {
     Ok(_) => {},
     Err(error) => {
       return ToolOutput {

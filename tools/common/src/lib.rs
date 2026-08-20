@@ -1,4 +1,9 @@
 pub mod tcp_socket;
+pub mod http;
+pub mod postgres;
+pub mod clickhouse;
+pub mod qdrant;
+pub mod litellm;
 
 pub use paste::paste;
 

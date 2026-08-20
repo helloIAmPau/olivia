@@ -121,11 +121,19 @@ pub struct S3Config {
 }
 
 #[derive(Deserialize)]
+pub struct QdrantConfig {
+  pub endpoint: String,
+  pub collection: String,
+  pub prompt: String
+}
+
+#[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum AgentStoreConfig {
   Postgres(PostgresConfig),
   Clickhouse(ClickhouseConfig),
-  S3(S3Config)
+  S3(S3Config),
+  Qdrant(QdrantConfig)
 }
 
 fn default_stores() -> HashMap<String, AgentStoreConfig> {
@@ -225,6 +233,9 @@ impl Agent {
         },
         AgentStoreConfig::S3(s3_config) => {
           store_prompt = format!("{}\n{} - {}\ntype: s3\nbucket: {}\nregion: {}\nendpoint: {}\naccess_key: {}\nsecret_key: {}\n", store_prompt, name, s3_config.prompt, s3_config.bucket, s3_config.region, s3_config.endpoint, s3_config.access_key, s3_config.secret_key);
+        },
+        AgentStoreConfig::Qdrant(qdrant_config) => {
+          store_prompt = format!("{}\n{} - {}\ntype: qdrant\nendpoint: {}\ncollection: {}\n", store_prompt, name, qdrant_config.prompt, qdrant_config.endpoint, qdrant_config.collection);
         }
       }
     }

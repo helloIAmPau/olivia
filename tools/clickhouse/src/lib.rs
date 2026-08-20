@@ -1,9 +1,8 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use waki::Client;
-
 use common::define_tool;
+use common::clickhouse::Clickhouse;
 
 #[derive(Deserialize, JsonSchema)]
 struct ClickhouseClientParams {
@@ -20,58 +19,24 @@ struct ClickhouseClientParams {
 fn run(input: ClickhouseClientParams) -> ToolOutput {
   println!("[clickhouse_client] Enabling tool");
 
-  let endpoint = format!("{}/", input.host.trim_end_matches('/'));
+  let client = Clickhouse::new(&input.host, &input.username, &input.password);
 
-  println!("[clickhouse_client] Endpoint: {}", endpoint);
-
-  let query_params: Vec<(&str, &str)> = vec![("default_format", "CSVWithNames")];
-
-  let headers: Vec<(&str, &str)> = vec![
-    ("X-ClickHouse-User", input.username.as_str()),
-    ("X-ClickHouse-Key", input.password.as_str())
-  ];
-
-  let response = match Client::new().post(endpoint.as_str()).query(query_params).headers(headers).body(input.query.into_bytes()).send() {
-    Ok(response) => response,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Request to clickhouse failed: {}", error)
+  return match client.query(&input.query) {
+    Ok(content) => {
+      let content = match content.is_empty() {
+        true => "No Data!".to_string(),
+        false => format!("DATA AS CSV:\n{}", content)
       };
-    }
-  };
 
-  let status = response.status_code();
-
-  println!("[clickhouse_client] Response status: {}", status);
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Could not read the clickhouse response: {}", error)
-      };
-    }
-  };
-
-  let content = String::from_utf8_lossy(&bytes).into_owned();
-
-  if status < 200 || status >= 300 {
-    return ToolOutput {
+      ToolOutput {
+        state: ToolOutputState::Done,
+        content
+      }
+    },
+    Err(error) => ToolOutput {
       state: ToolOutputState::Error,
-      content: format!("Clickhouse returned status {}: {}", status, content)
-    };
-  }
-
-  let content = match content.is_empty() {
-    true => "No Data!".to_string(),
-    false => format!("DATA AS CSV:\n{}", content)
-  };
-
-  return ToolOutput {
-    state: ToolOutputState::Done,
-    content
+      content: error.to_string()
+    }
   };
 }
 

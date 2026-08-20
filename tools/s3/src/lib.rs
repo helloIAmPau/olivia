@@ -7,9 +7,6 @@ use serde::Deserialize;
 
 use url::Url;
 
-use waki::Client;
-use waki::Response;
-
 use rusty_s3::Bucket;
 use rusty_s3::Credentials;
 use rusty_s3::UrlStyle;
@@ -17,6 +14,8 @@ use rusty_s3::S3Action;
 use rusty_s3::actions::ListObjectsV2;
 
 use common::define_tool;
+use common::http::HttpClient;
+use common::http::Response;
 
 // Shared working directory preopened for every tool; uploads are read from here
 // and downloads are written here.
@@ -53,21 +52,14 @@ struct S3ClientParams {
 
 const EXPIRES: Duration = Duration::from_secs(300);
 
-fn read_ok(response: Response) -> Result<Vec<u8>, String> {
-  let status = response.status_code();
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => return Err(format!("Could not read the S3 response: {}", error))
-  };
-
-  if status < 200 || status >= 300 {
-    let body = String::from_utf8_lossy(&bytes).into_owned();
-
-    return Err(format!("S3 returned status {}: {}", status, body));
+// The presigned URL already carries the auth query string, so each request is
+// issued against it as the client base with an empty path.
+fn check(response: &Response) -> Result<(), String> {
+  if response.is_success() == false {
+    return Err(format!("S3 returned status {}: {}", response.status, response.text()));
   }
 
-  return Ok(bytes);
+  return Ok(());
 }
 
 fn run(input: S3ClientParams) -> ToolOutput {
@@ -100,7 +92,8 @@ fn run(input: S3ClientParams) -> ToolOutput {
       let action = bucket.list_objects_v2(Some(&credentials));
       let url = action.sign(EXPIRES);
 
-      let response = match Client::new().get(url.as_str()).send() {
+      let client = HttpClient::new(url.as_str());
+      let response = match client.get("", vec![], vec![]) {
         Ok(response) => response,
         Err(error) => {
           return ToolOutput {
@@ -110,8 +103,8 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let bytes = match read_ok(response) {
-        Ok(bytes) => bytes,
+      match check(&response) {
+        Ok(_) => {},
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
@@ -120,7 +113,7 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let body = String::from_utf8_lossy(&bytes).into_owned();
+      let body = response.text();
 
       let parsed = match ListObjectsV2::parse_response(&body) {
         Ok(parsed) => parsed,
@@ -192,9 +185,13 @@ fn run(input: S3ClientParams) -> ToolOutput {
       let action = bucket.put_object(Some(&credentials), &key);
       let url = action.sign(EXPIRES);
 
-      let length = content.len();
+      // RustFS rejects the upload with a 400 UnexpectedContent unless the
+      // Content-Length is set explicitly, so compute it before moving the body.
+      let length = content.len().to_string();
+      let headers: Vec<(&str, &str)> = vec![("Content-Length", length.as_str())];
 
-      let response = match Client::new().put(url.as_str()).header("Content-Length", length.to_string()).body(content).send() {
+      let client = HttpClient::new(url.as_str());
+      let response = match client.put_raw("", headers, vec![], content) {
         Ok(response) => response,
         Err(error) => {
           return ToolOutput {
@@ -204,7 +201,7 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      match read_ok(response) {
+      match check(&response) {
         Ok(_) => {
           return ToolOutput {
             state: ToolOutputState::Done,
@@ -233,7 +230,8 @@ fn run(input: S3ClientParams) -> ToolOutput {
       let action = bucket.delete_object(Some(&credentials), &key);
       let url = action.sign(EXPIRES);
 
-      let response = match Client::new().delete(url.as_str()).send() {
+      let client = HttpClient::new(url.as_str());
+      let response = match client.delete("", vec![], vec![], None::<&()>) {
         Ok(response) => response,
         Err(error) => {
           return ToolOutput {
@@ -243,7 +241,7 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      match read_ok(response) {
+      match check(&response) {
         Ok(_) => {
           return ToolOutput {
             state: ToolOutputState::Done,
@@ -289,7 +287,8 @@ fn run(input: S3ClientParams) -> ToolOutput {
       let action = bucket.get_object(Some(&credentials), &key);
       let url = action.sign(EXPIRES);
 
-      let response = match Client::new().get(url.as_str()).send() {
+      let client = HttpClient::new(url.as_str());
+      let response = match client.get("", vec![], vec![]) {
         Ok(response) => response,
         Err(error) => {
           return ToolOutput {
@@ -299,8 +298,8 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let bytes = match read_ok(response) {
-        Ok(bytes) => bytes,
+      match check(&response) {
+        Ok(_) => {},
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
@@ -310,9 +309,10 @@ fn run(input: S3ClientParams) -> ToolOutput {
       };
 
       let path = format!("{}/{}", SANDBOX_PATH, filename);
+      let bytes = response.bytes();
       let size = bytes.len();
 
-      match write(&path, &bytes) {
+      match write(&path, bytes) {
         Ok(_) => {},
         Err(error) => {
           return ToolOutput {
