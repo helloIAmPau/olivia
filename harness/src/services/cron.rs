@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
+
 use tokio_cron_scheduler::Job;
 use tokio_cron_scheduler::JobScheduler;
 
 use tracing::info;
+use tracing::warn;
 use tracing::error;
 
 use serde::Deserialize;
@@ -32,15 +35,24 @@ pub async fn init_cron(name: String, config: CronConfig, agent: Arc<Agent>) -> R
   let schedule = config.schedule;
   let prompt = config.prompt;
   let job_schedule = schedule.clone();
+  let lock = Arc::new(Mutex::new(()));
 
   let job = match Job::new_async(job_schedule, move |_uuid, _scheduler| {
     let name = name.clone();
     let schedule = schedule.clone();
     let prompt = prompt.clone();
     let agent = agent.clone();
+    let lock = lock.clone();
 
     return Box::pin(async move {
       info!("Cron job {} activated ({})", name, schedule);
+
+      match lock.try_lock() {
+        Err(_) => {
+          warn!("Cron job {} still running... Skipping", name);
+        },
+        _ => {}
+      }
 
       let system_prompt = format!(r#"
 A cron job called {} with the following schedule {} has activated.
@@ -86,8 +98,6 @@ A cron job called {} with the following schedule {} has activated.
     },
     _ => {}
   };
-
-  //std::future::pending::<()>().await;
 
   return Ok(());
 }
