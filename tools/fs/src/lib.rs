@@ -236,5 +236,6 @@ define_tool!(
   Fs,
   FsParams,
   "Manages files and directories inside the shared /sandbox working directory. Supports three operations selected via the `operation` field: \"list\" returns the entries (each prefixed with `dir ` or `file`) of the directory at `path` (defaults to the sandbox root); \"create\" makes a new file or directory at `path` depending on `kind` (\"file\" or \"directory\"), optionally writing `content` into a file and creating any missing parent directories; \"delete\" removes the file or directory at `path` (directories are removed recursively). All paths are relative to /sandbox, must not contain \"..\", and cannot escape the sandbox. Use it to inspect what other tools have written, to lay out folders, and to clean up files.",
+  vec![Permission::FileSystem],
   run
 );

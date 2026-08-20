@@ -8,6 +8,7 @@ services:
     ports:
       - '9000:9000'
     environment:
+      - 'RUST_BACKTRACE=1'
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
       - 'OLIVIA_TOOL_BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN}'
     configs:
@@ -30,7 +31,7 @@ services:
         condition: 'service_healthy'
     volumes:
       - '.:/source'
-      - './data/tools:/tools:ro'
+      - './data/olivia/tools:/tools:ro'
       - './data/olivia/sandbox:/sandbox'
       - './examples:/examples:ro'
   tools-builder:
@@ -43,7 +44,7 @@ services:
       - 'backend'
     volumes:
       - '.:/source'
-      - './data/tools:/tools'
+      - './data/olivia/tools:/tools'
   litellm:
     image: 'ghcr.io/berriai/litellm:v1.93.0'
     restart: 'always'
