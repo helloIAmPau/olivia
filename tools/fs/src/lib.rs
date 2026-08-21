@@ -1,19 +1,9 @@
-use std::path::Path;
-
-use std::fs::create_dir_all;
-use std::fs::metadata;
-use std::fs::read_dir;
-use std::fs::remove_dir_all;
-use std::fs::remove_file;
-use std::fs::write;
-
 use schemars::JsonSchema;
 
 use serde::Deserialize;
 
 use common::define_tool;
-
-const SANDBOX_PATH: &str = "/sandbox";
+use common::fs::Sandbox;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -43,62 +33,34 @@ struct FsParams {
 }
 
 fn run(input: FsParams) -> ToolOutput {
-  let raw = match input.path {
-    Some(path) => path,
-    None => String::new()
-  };
+  let sandbox = Sandbox::new();
 
-  let trimmed = raw.trim();
-  let target = if trimmed.is_empty() || trimmed == "." || trimmed == "/" {
-    SANDBOX_PATH.to_string()
-  } else if trimmed.contains("..") {
-    return ToolOutput {
-      state: ToolOutputState::Error,
-      content: format!("Invalid path {}: it must not contain '..'", raw)
-    };
-  } else {
-    format!("{}/{}", SANDBOX_PATH, trimmed.trim_start_matches('/'))
+  let target = match sandbox.resolve(input.path.unwrap_or_default()) {
+    Ok(target) => target,
+    Err(error) => {
+      return ToolOutput {
+        state: ToolOutputState::Error,
+        content: error.to_string()
+      };
+    }
   };
 
   match input.operation {
     FsOperation::List => {
-      let entries = match read_dir(&target) {
+      let entries = match sandbox.list(target.clone()) {
         Ok(entries) => entries,
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: format!("Unable to list {}: {}", target, error)
+            content: error.to_string()
           };
         }
       };
 
       let mut listing = String::new();
-
       for entry in entries {
-        let entry = match entry {
-          Ok(entry) => entry,
-          Err(error) => {
-            return ToolOutput {
-              state: ToolOutputState::Error,
-              content: format!("Unable to read an entry of {}: {}", target, error)
-            };
-          }
-        };
-
-        let file_type = match entry.file_type() {
-          Ok(file_type) => file_type,
-          Err(error) => {
-            return ToolOutput {
-              state: ToolOutputState::Error,
-              content: format!("Unable to inspect an entry of {}: {}", target, error)
-            };
-          }
-        };
-
-        let marker = if file_type.is_dir() { "dir " } else { "file" };
-        let name = entry.file_name().to_string_lossy().into_owned();
-
-        listing = format!("{}{} {}\n", listing, marker, name);
+        let marker = if entry.is_dir { "dir " } else { "file" };
+        listing = format!("{}{} {}\n", listing, marker, entry.name);
       }
 
       if listing.is_empty() {
@@ -126,107 +88,45 @@ fn run(input: FsParams) -> ToolOutput {
 
       match kind {
         FsKind::Directory => {
-          match create_dir_all(&target) {
-            Ok(_) => {},
-            Err(error) => {
-              return ToolOutput {
-                state: ToolOutputState::Error,
-                content: format!("Unable to create directory {}: {}", target, error)
-              };
+          return match sandbox.create_directory(target.clone()) {
+            Ok(_) => ToolOutput {
+              state: ToolOutputState::Done,
+              content: format!("Created directory {}", target)
+            },
+            Err(error) => ToolOutput {
+              state: ToolOutputState::Error,
+              content: error.to_string()
             }
-          };
-
-          return ToolOutput {
-            state: ToolOutputState::Done,
-            content: format!("Created directory {}", target)
           };
         },
         FsKind::File => {
-          match Path::new(&target).parent() {
-            Some(parent) => {
-              match create_dir_all(parent) {
-                Ok(_) => {},
-                Err(error) => {
-                  return ToolOutput {
-                    state: ToolOutputState::Error,
-                    content: format!("Unable to create parent directory for {}: {}", target, error)
-                  };
-                }
-              };
+          return match sandbox.create_file(target.clone(), input.content.as_deref()) {
+            Ok(bytes) => ToolOutput {
+              state: ToolOutputState::Done,
+              content: format!("Created file {} ({} bytes)", target, bytes)
             },
-            None => {}
-          };
-
-          let body = match input.content {
-            Some(body) => body,
-            None => String::new()
-          };
-
-          match write(&target, body.as_bytes()) {
-            Ok(_) => {},
-            Err(error) => {
-              return ToolOutput {
-                state: ToolOutputState::Error,
-                content: format!("Unable to create file {}: {}", target, error)
-              };
+            Err(error) => ToolOutput {
+              state: ToolOutputState::Error,
+              content: error.to_string()
             }
-          };
-
-          return ToolOutput {
-            state: ToolOutputState::Done,
-            content: format!("Created file {} ({} bytes)", target, body.len())
           };
         }
       }
     },
     FsOperation::Delete => {
-      if target == SANDBOX_PATH {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: "Refusing to delete the sandbox root".to_string()
-        };
-      }
-
-      let meta = match metadata(&target) {
-        Ok(meta) => meta,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Unable to delete {}: {}", target, error)
-          };
-        }
-      };
-
-      if meta.is_dir() {
-        match remove_dir_all(&target) {
-          Ok(_) => {},
-          Err(error) => {
-            return ToolOutput {
-              state: ToolOutputState::Error,
-              content: format!("Unable to delete directory {}: {}", target, error)
-            };
-          }
-        };
-
-        return ToolOutput {
+      return match sandbox.delete(target.clone()) {
+        Ok(true) => ToolOutput {
           state: ToolOutputState::Done,
           content: format!("Deleted directory {}", target)
-        };
-      }
-
-      match remove_file(&target) {
-        Ok(_) => {},
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Unable to delete file {}: {}", target, error)
-          };
+        },
+        Ok(false) => ToolOutput {
+          state: ToolOutputState::Done,
+          content: format!("Deleted file {}", target)
+        },
+        Err(error) => ToolOutput {
+          state: ToolOutputState::Error,
+          content: error.to_string()
         }
-      };
-
-      return ToolOutput {
-        state: ToolOutputState::Done,
-        content: format!("Deleted file {}", target)
       };
     }
   }

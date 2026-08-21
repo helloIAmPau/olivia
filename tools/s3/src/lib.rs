@@ -1,26 +1,9 @@
-use std::time::Duration;
-use std::fs::read;
-use std::fs::write;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use url::Url;
-
-use waki::Client;
-use waki::Response;
-
-use rusty_s3::Bucket;
-use rusty_s3::Credentials;
-use rusty_s3::UrlStyle;
-use rusty_s3::S3Action;
-use rusty_s3::actions::ListObjectsV2;
-
 use common::define_tool;
-
-// Shared working directory preopened for every tool; uploads are read from here
-// and downloads are written here.
-const SANDBOX_PATH: &str = "/sandbox";
+use common::s3::S3;
+use common::fs::Sandbox;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -47,107 +30,36 @@ struct S3ClientParams {
   operation: S3Operation,
   /// The object key (its path within the bucket), e.g. reports/2026.txt. Required for create, delete and download; ignored for list.
   key: Option<String>,
-  /// The name of the file inside the /sandbox directory to upload (for create) or to save the downloaded object as (for download), e.g. report.pdf. Required for create and download; ignored otherwise. Must be a plain file name: no directory separators and no "..".
+  /// The file inside the /sandbox directory to upload (for create) or to save the downloaded object as (for download), e.g. report.pdf. Required for create and download; ignored otherwise. It is relative to /sandbox and must not contain "..".
   filename: Option<String>
-}
-
-const EXPIRES: Duration = Duration::from_secs(300);
-
-fn read_ok(response: Response) -> Result<Vec<u8>, String> {
-  let status = response.status_code();
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => return Err(format!("Could not read the S3 response: {}", error))
-  };
-
-  if status < 200 || status >= 300 {
-    let body = String::from_utf8_lossy(&bytes).into_owned();
-
-    return Err(format!("S3 returned status {}: {}", status, body));
-  }
-
-  return Ok(bytes);
 }
 
 fn run(input: S3ClientParams) -> ToolOutput {
   println!("[s3_client] Enabling tool");
 
-  let endpoint = match Url::parse(&input.endpoint) {
-    Ok(endpoint) => endpoint,
+  let s3 = match S3::new(&input.endpoint, &input.bucket, &input.region, &input.access_key, &input.secret_key) {
+    Ok(s3) => s3,
     Err(error) => {
       return ToolOutput {
         state: ToolOutputState::Error,
-        content: format!("Invalid endpoint {}: {}", input.endpoint, error)
+        content: error.to_string()
       };
     }
   };
 
-  let bucket = match Bucket::new(endpoint, UrlStyle::Path, input.bucket.clone(), input.region.clone()) {
-    Ok(bucket) => bucket,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Invalid bucket configuration for {}: {}", input.bucket, error)
-      };
-    }
-  };
-
-  let credentials = Credentials::new(input.access_key, input.secret_key);
+  let sandbox = Sandbox::new();
 
   match input.operation {
     S3Operation::List => {
-      let action = bucket.list_objects_v2(Some(&credentials));
-      let url = action.sign(EXPIRES);
-
-      let response = match Client::new().get(url.as_str()).send() {
-        Ok(response) => response,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Request to S3 failed: {}", error)
-          };
+      return match s3.list() {
+        Ok(content) => ToolOutput {
+          state: ToolOutputState::Done,
+          content
+        },
+        Err(error) => ToolOutput {
+          state: ToolOutputState::Error,
+          content: error.to_string()
         }
-      };
-
-      let bytes = match read_ok(response) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: error
-          };
-        }
-      };
-
-      let body = String::from_utf8_lossy(&bytes).into_owned();
-
-      let parsed = match ListObjectsV2::parse_response(&body) {
-        Ok(parsed) => parsed,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Could not parse the S3 listing: {}", error)
-          };
-        }
-      };
-
-      let mut lines: Vec<String> = Vec::new();
-      for prefix in parsed.common_prefixes {
-        lines.push(prefix.prefix);
-      }
-      for object in parsed.contents {
-        lines.push(format!("{} ({} bytes)", object.key, object.size));
-      }
-
-      let content = match lines.is_empty() {
-        true => "(no objects)".to_string(),
-        false => lines.join("\n")
-      };
-
-      return ToolOutput {
-        state: ToolOutputState::Done,
-        content
       };
     },
     S3Operation::Create => {
@@ -171,51 +83,34 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      if filename.is_empty() || filename.contains('/') || filename.contains("..") {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", filename)
-        };
-      }
+      let target = match sandbox.resolve(filename) {
+        Ok(target) => target,
+        Err(error) => {
+          return ToolOutput {
+            state: ToolOutputState::Error,
+            content: error.to_string()
+          };
+        }
+      };
 
-      let path = format!("{}/{}", SANDBOX_PATH, filename);
-      let content = match read(&path) {
+      let content = match sandbox.read(target.clone()) {
         Ok(content) => content,
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: format!("Unable to read the sandbox file {}: {}", path, error)
+            content: error.to_string()
           };
         }
       };
 
-      let action = bucket.put_object(Some(&credentials), &key);
-      let url = action.sign(EXPIRES);
-
-      let length = content.len();
-
-      let response = match Client::new().put(url.as_str()).header("Content-Length", length.to_string()).body(content).send() {
-        Ok(response) => response,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Request to S3 failed: {}", error)
-          };
-        }
-      };
-
-      match read_ok(response) {
-        Ok(_) => {
-          return ToolOutput {
-            state: ToolOutputState::Done,
-            content: format!("Uploaded {} to object {}", path, key)
-          };
+      return match s3.upload(&key, content) {
+        Ok(_) => ToolOutput {
+          state: ToolOutputState::Done,
+          content: format!("Uploaded {} to object {}", target, key)
         },
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: error
-          };
+        Err(error) => ToolOutput {
+          state: ToolOutputState::Error,
+          content: error.to_string()
         }
       };
     },
@@ -230,31 +125,14 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let action = bucket.delete_object(Some(&credentials), &key);
-      let url = action.sign(EXPIRES);
-
-      let response = match Client::new().delete(url.as_str()).send() {
-        Ok(response) => response,
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: format!("Request to S3 failed: {}", error)
-          };
-        }
-      };
-
-      match read_ok(response) {
-        Ok(_) => {
-          return ToolOutput {
-            state: ToolOutputState::Done,
-            content: format!("Deleted object {}", key)
-          };
+      return match s3.delete(&key) {
+        Ok(_) => ToolOutput {
+          state: ToolOutputState::Done,
+          content: format!("Deleted object {}", key)
         },
-        Err(error) => {
-          return ToolOutput {
-            state: ToolOutputState::Error,
-            content: error
-          };
+        Err(error) => ToolOutput {
+          state: ToolOutputState::Error,
+          content: error.to_string()
         }
       };
     },
@@ -279,52 +157,41 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      if filename.is_empty() || filename.contains('/') || filename.contains("..") {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", filename)
-        };
-      }
-
-      let action = bucket.get_object(Some(&credentials), &key);
-      let url = action.sign(EXPIRES);
-
-      let response = match Client::new().get(url.as_str()).send() {
-        Ok(response) => response,
+      let target = match sandbox.resolve(filename) {
+        Ok(target) => target,
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: format!("Request to S3 failed: {}", error)
+            content: error.to_string()
           };
         }
       };
 
-      let bytes = match read_ok(response) {
+      let bytes = match s3.download(&key) {
         Ok(bytes) => bytes,
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: error
+            content: error.to_string()
           };
         }
       };
 
-      let path = format!("{}/{}", SANDBOX_PATH, filename);
       let size = bytes.len();
 
-      match write(&path, &bytes) {
+      match sandbox.write(target.clone(), &bytes) {
         Ok(_) => {},
         Err(error) => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: format!("Unable to write the downloaded object to {}: {}", path, error)
+            content: error.to_string()
           };
         }
       };
 
       return ToolOutput {
         state: ToolOutputState::Done,
-        content: format!("Downloaded object {} ({} bytes) to {}", key, size, path)
+        content: format!("Downloaded object {} ({} bytes) to {}", key, size, target)
       };
     }
   }
