@@ -271,7 +271,15 @@ checksum = "2550f75b8cfac212855f6b1885455df8eaee8fe8e246b647d69146142e016084"
 name = "common"
 version = "0.0.1"
 dependencies = [
+ "bytes",
+ "fallible-iterator",
  "paste",
+ "postgres-protocol",
+ "rusty-s3",
+ "serde",
+ "serde_json",
+ "url",
+ "waki",
 ]
 
 [[package]]
@@ -1486,14 +1494,10 @@ dependencies = [
 name = "postgres"
 version = "0.0.1"
 dependencies = [
- "bytes",
  "common",
- "fallible-iterator",
- "postgres-protocol",
  "schemars",
  "serde",
  "serde_json",
- "url",
  "wit-bindgen 0.60.0",
 ]
 
@@ -2128,12 +2132,9 @@ name = "s3"
 version = "0.0.1"
 dependencies = [
  "common",
- "rusty-s3",
  "schemars",
  "serde",
  "serde_json",
- "url",
- "waki",
  "wit-bindgen 0.60.0",
 ]
 

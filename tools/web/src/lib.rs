@@ -5,9 +5,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
-use waki::Client;
-
 use common::define_tool;
+use common::http::HttpClient;
 
 #[derive(Deserialize, JsonSchema)]
 struct WebParams {
@@ -40,12 +39,17 @@ fn run(input: WebParams) -> ToolOutput {
     Err(_) => "http://browserless:3000".to_string()
   };
 
-  let endpoint = format!("{}/function", host);
   let payload = FunctionRequest {
     code: input.code
   };
 
-  let response = match Client::new().post(endpoint.as_str()).query([("token", token), ("launch", "{\"stealth\":true}".to_string())]).json(&payload).send() {
+  let client = HttpClient::new(host);
+  let query = vec![
+    ("token", token.as_str()),
+    ("launch", "{\"stealth\":true}")
+  ];
+
+  let response = match client.post("/function", vec![], query, Some(&payload)) {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {
@@ -55,30 +59,16 @@ fn run(input: WebParams) -> ToolOutput {
     }
   };
 
-  let status = response.status_code();
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Could not read the browserless response: {}", error)
-      };
-    }
-  };
-
-  let content = String::from_utf8_lossy(&bytes).into_owned();
-
-  if status < 200 || status >= 300 {
+  if response.is_success() == false {
     return ToolOutput {
       state: ToolOutputState::Error,
-      content: format!("browserless /function returned status {}: {}", status, content)
+      content: format!("browserless /function returned status {}: {}", response.status, response.text())
     };
   }
 
   return ToolOutput {
     state: ToolOutputState::Done,
-    content
+    content: response.text()
   };
 }
 

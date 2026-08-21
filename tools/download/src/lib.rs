@@ -1,17 +1,13 @@
 use std::env::var;
-use std::fs::write;
 
 use schemars::JsonSchema;
 
 use serde::Deserialize;
 use serde::Serialize;
 
-use waki::Client;
-
 use common::define_tool;
-
-// Shared working directory preopened for every tool; downloads are saved here.
-const SANDBOX_PATH: &str = "/sandbox";
+use common::http::HttpClient;
+use common::fs::Sandbox;
 
 #[derive(Deserialize, JsonSchema)]
 struct DownloadParams {
@@ -28,8 +24,7 @@ struct DownloadParams {
   /// export default async function ({ page }) { await page.goto('https://example.com'); await page.evaluate(() => { const a = document.createElement('a'); a.href = 'https://example.com/report.pdf'; a.download = ''; document.body.appendChild(a); a.click(); }); await new Promise(r => setTimeout(r, 5000)); }
   code: String,
   /// The name to save the downloaded file under, inside the /sandbox directory
-  /// (e.g. report.pdf). Must be a plain file name: no directory separators and
-  /// no "..".
+  /// (e.g. report.pdf). It is relative to /sandbox and must not contain "..".
   filename: String
 }
 
@@ -54,20 +49,28 @@ fn run(input: DownloadParams) -> ToolOutput {
     Err(_) => "http://browserless:3000".to_string()
   };
 
-  // Keep the write confined to the sandbox: reject anything that could escape it.
-  if input.filename.is_empty() || input.filename.contains('/') || input.filename.contains("..") {
-    return ToolOutput {
-      state: ToolOutputState::Error,
-      content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", input.filename)
-    };
-  }
+  let sandbox = Sandbox::new();
+  let target = match sandbox.resolve(input.filename) {
+    Ok(target) => target,
+    Err(error) => {
+      return ToolOutput {
+        state: ToolOutputState::Error,
+        content: error.to_string()
+      };
+    }
+  };
 
-  let endpoint = format!("{}/download", host);
   let payload = FunctionRequest {
     code: input.code
   };
 
-  let response = match Client::new().post(endpoint.as_str()).query([("token", token), ("launch", "{\"stealth\":true}".to_string())]).json(&payload).send() {
+  let client = HttpClient::new(host);
+  let query = vec![
+    ("token", token.as_str()),
+    ("launch", "{\"stealth\":true}")
+  ];
+
+  let response = match client.post("/download", vec![], query, Some(&payload)) {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {
@@ -77,45 +80,31 @@ fn run(input: DownloadParams) -> ToolOutput {
     }
   };
 
-  let status = response.status_code();
-
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Could not read the browserless response: {}", error)
-      };
-    }
-  };
-
-  if status < 200 || status >= 300 {
-    let body = String::from_utf8_lossy(&bytes).into_owned();
-
+  if response.is_success() == false {
     return ToolOutput {
       state: ToolOutputState::Error,
-      content: format!("browserless /download returned status {}: {}", status, body)
+      content: format!("browserless /download returned status {}: {}", response.status, response.text())
     };
   }
 
-  let path = format!("{}/{}", SANDBOX_PATH, input.filename);
+  let bytes = response.bytes();
   let size = bytes.len();
 
-  println!("[download] Saving {} bytes to {}", size, path);
+  println!("[download] Saving {} bytes to {}", size, target);
 
-  match write(&path, &bytes) {
+  match sandbox.write(target.clone(), bytes) {
     Ok(_) => {},
     Err(error) => {
       return ToolOutput {
         state: ToolOutputState::Error,
-        content: format!("Unable to write the downloaded file to {}: {}", path, error)
+        content: error.to_string()
       };
     }
   };
 
   return ToolOutput {
     state: ToolOutputState::Done,
-    content: format!("Downloaded {} bytes to {}", size, path)
+    content: format!("Downloaded {} bytes to {}", size, target)
   };
 }
 

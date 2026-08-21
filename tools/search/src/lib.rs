@@ -4,9 +4,8 @@ use schemars::JsonSchema;
 
 use serde::Deserialize;
 
-use waki::Client;
-
 use common::define_tool;
+use common::http::HttpClient;
 
 #[derive(Deserialize, JsonSchema)]
 struct SearchParams {
@@ -20,34 +19,33 @@ fn run(input: SearchParams) -> ToolOutput {
     Err(_) => "http://searxng:8080".to_string()
   };
 
-  let endpoint = format!("{}/search", base);
-  let response = match Client::new().get(endpoint.as_str()).query([
-    ("q", input.query),
-    ("format", "json".to_string()),
-    ("limit", "5".to_string())
-  ]).send() {
+  let client = HttpClient::new(base);
+  let query = vec![
+    ("q", input.query.as_str()),
+    ("format", "json"),
+    ("limit", "5")
+  ];
+
+  let response = match client.get("/search", vec![], query) {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {
         state: ToolOutputState::Error,
-        content: format!("Request to browserless failed: {}", error)
+        content: format!("Request to searxng failed: {}", error)
       };
     }
   };
 
-  let bytes = match response.body() {
-    Ok(bytes) => bytes,
-    Err(error) => {
-      return ToolOutput {
-        state: ToolOutputState::Error,
-        content: format!("Could not read the browserless response: {}", error)
-      };
-    }
-  };
+  if response.is_success() == false {
+    return ToolOutput {
+      state: ToolOutputState::Error,
+      content: format!("searxng returned status {}: {}", response.status, response.text())
+    };
+  }
 
   return ToolOutput {
     state: ToolOutputState::Done,
-    content: String::from_utf8_lossy(&bytes).into_owned()
+    content: response.text()
   };
 }
 
