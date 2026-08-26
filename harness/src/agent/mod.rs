@@ -301,6 +301,10 @@ AVAILABLE DATA STORES:
       ChatMessage {
         role: ChatMessageRole::System,
         content: context.to_string()
+      },
+      ChatMessage {
+        role: ChatMessageRole::System,
+        content: self.config.prompt.clone()
       }
     ];
     payload.extend_from_slice(&request);
