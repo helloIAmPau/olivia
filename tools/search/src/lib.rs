@@ -14,6 +14,22 @@ struct SearchParams {
   query: String
 }
 
+#[derive(Deserialize)]
+struct SearchResult {
+  #[serde(default)]
+  title: String,
+  #[serde(default)]
+  url: String,
+  #[serde(default)]
+  content: String
+}
+
+#[derive(Deserialize)]
+struct SearchResponse {
+  #[serde(default)]
+  results: Vec<SearchResult>
+}
+
 fn run(input: SearchParams) -> ToolOutput {
   let base = match var("SEARXNG_HOST") {
     Ok(base) => base,
@@ -40,14 +56,29 @@ fn run(input: SearchParams) -> ToolOutput {
     Err(error) => {
       return ToolOutput {
         state: ToolOutputState::Error,
-        content: format!("Could not read the browserless response: {}", error)
+        content: format!("Could not read the search response: {}", error)
       };
     }
   };
 
+  let parsed: SearchResponse = match serde_json::from_slice(&bytes) {
+    Ok(parsed) => parsed,
+    Err(error) => {
+      return ToolOutput {
+        state: ToolOutputState::Error,
+        content: format!("Could not parse the search response: {}", error)
+      };
+    }
+  };
+
+  let mut content = String::new();
+  for result in parsed.results.iter().take(5) {
+    content.push_str(&format!("{}\n{}\n{}\n\n", result.title, result.url, result.content));
+  }
+
   return ToolOutput {
     state: ToolOutputState::Done,
-    content: String::from_utf8_lossy(&bytes).into_owned()
+    content: content
   };
 }
 
