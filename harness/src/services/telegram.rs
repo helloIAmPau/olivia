@@ -71,7 +71,7 @@ async fn handle_command(bot: Bot, message: Message, command: Commands, state: Ar
         }
       ];
 
-      match state.agent.accept(request).await {
+      match state.agent.accept(request, None).await {
         Ok(data) => {
           let session_id = data.session_id;
 
@@ -124,7 +124,7 @@ async fn handle_message(bot: Bot, message: Message, state: Arc<ServiceState<Tele
     }
   ];
 
-  match state.agent.ask(session_id, request).await {
+  match state.agent.accept(request, Some(session_id)).await {
     Ok(data) => {
       return send_payload(bot, message, data).await;
     },

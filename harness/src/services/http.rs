@@ -154,12 +154,12 @@ The request contains a payload as well:
         }
       };
 
-      state.agent.ask(session_id, request).await
+      state.agent.accept(request, Some(session_id)).await
     },
     None => {
       info!("Creating new session for request");
 
-      state.agent.accept(request).await
+      state.agent.accept(request, None).await
     }
   };
 

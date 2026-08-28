@@ -69,7 +69,7 @@ A cron job called {} with the following schedule {} has activated.
         }
       ];
 
-      match agent.accept(request).await {
+      match agent.accept(request, None).await {
         Ok(_) => {
           info!("Cron job {} completed", name);
         },

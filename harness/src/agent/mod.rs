@@ -151,10 +151,24 @@ pub enum AgentPayloadState {
   Tool
 }
 
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct Thought {
+  /// User objective, <=20 words. Written once, copied forward verbatim. Never edit.
+  pub goal: String,
+  /// Steps as "<n>. <imperative, <=10 words>". Max 8. Indices never reused; gaps expected after replan. Entries with a `done` record are frozen.
+  pub plan: Vec<String>,
+  /// Append-only log: "<n>:<ok|fail> <outcome, <=8 words>". Outcomes, not narrative. Never restate tool output. Retries repeat an index.
+  pub done: Vec<String>,
+  /// Values later steps need: paths, IDs, counts. Terse keys. Drop when no remaining step needs them. No credentials, no file contents.
+  pub facts: HashMap<String, String>,
+  /// Step running now: "<n> <action>". Justify only if non-obvious. "<n> complete" when done, "<n> abort" on error.
+  pub cur: String
+}
+
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct AgentPayload {
-  /// Internal reasoning / plan for the current step. Required for all states
-  pub thought: Option<String>,
+  /// Your memory. Used for internal reasoning, plan for the current step, keep track of the execution and more. Required for all states.
+  pub thought: String,
   /// the execution result
   pub state: AgentPayloadState,
   /// your output if the execution succeded. Required for state = Done, null otherwise
@@ -168,19 +182,25 @@ pub struct AgentPayload {
 }
 
 #[derive(Serialize)]
+pub struct ToolOutput {
+  pub output: String
+}
+
+#[derive(Serialize)]
 pub struct AgentResult {
   pub session_id: Uuid,
   pub payload: AgentPayload
 }
 
 const MAX_ITERATIONS: i32 = 200;
+const MAX_BAD_ITERATIONS: i32 = 3;
 
 pub struct Agent {
   client: LLMClient,
   config: AgentConfig,
   registry: ToolRegistry,
   store_prompt: String,
-  sessions: Mutex<HashMap<Uuid, Vec<ChatMessage>>>
+  sessions: Mutex<HashMap<Uuid, String>>
 }
 
 impl Agent {
@@ -240,41 +260,119 @@ impl Agent {
     return Ok(agent);
   }
 
-  pub async fn accept(&self, request: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
-    let session_id = Uuid::new_v4();
-    debug!("Agent accepted a new request (session {})", session_id);
-
+  pub async fn accept(&self, request: Vec<ChatMessage>, maybe_session_id: Option<Uuid>) -> Result<AgentResult, AgentError> {
     let context = format!(r#"
 You are OlivIA, a strict AI task coordinator. Your SOLE function is to analyze requests, plan a sequence of actions, and delegate execution to external tools in an iterative loop.
 
 CRITICAL BEHAVIORAL RULES:
 
 1. ITERATIVE EXECUTION (THE LOOP): You operate in a continuous Plan -> Act -> Observe loop. You are capable of chaining multiple tools to complete complex tasks. Execute ONE step at a time. Call a tool, wait for the environment to return the result, and then evaluate your next step. Continue this loop until the overarching goal is achieved, then return a "done" state.
+
 2. DELEGATE EXECUTION: Do NOT calculate, process heavy logic, or attempt to fulfill execution steps using your internal knowledge. You must use the provided tools to execute ANY action, retrieve ANY information, or process ANY logic. You are a router and coordinator.
-3. HANDLING LARGE & BINARY FILES: NEVER attempt to read, output, or pass binary data (images, PDFs, raw file bytes, large text dumps) directly into your conversational context. You must save all downloads and generated files directly to the `/sandbox` using the `download`, `fs`, or `s3_client` tools. If you need to extract information from a downloaded file, write a script using the `python` tool to process the file in the sandbox and return only the requested text/metadata.
+
+3. HANDLING LARGE & BINARY FILES: NEVER attempt to read, output, or pass binary data (images, PDFs, raw file bytes, large text dumps) directly into your conversational context. You must save all downloads and generated files directly to `/sandbox` using the `download`, `fs`, or `s3_client` tools. If you need to extract information from a downloaded file, write a script using the `python` tool to process the file in the sandbox and return only the requested text/metadata.
+
 4. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object.
-5. CHAIN OF THOUGHT: You must use the "thought" field in your JSON to silently plan your next move, evaluate previous tool outputs, and decide what to do next. If you encounter an unrecoverable error, explain it strictly in the "error_message" field. If you successfully complete the task, place your final output or response strictly in the "result" field. Do not use the error_message field unless state="error".
+
+   "thought" and "params" are both JSON-ENCODED STRINGS. Each holds a complete
+   JSON object, serialized: opening quote, escaped inner quotes, closing quote.
+   The SAME rule applies to both — there is no exception and no asymmetry.
+
+     RIGHT: "thought": "{{\"goal\":\"fetch report\",\"plan\":[\"1. download\"]}}"
+     WRONG: "thought": {{"goal": "fetch report", "plan": ["1. download"]}}
+
+     RIGHT: "params": "{{\"query\":\"weather Milan\"}}"
+     WRONG: "params": {{"query": "weather Milan"}}
+
+   Both strings must deserialize cleanly. Escape every inner quote. Escape
+   newlines inside values as \n. Emit no raw line breaks inside either string.
+
+5. STATEFUL CHAIN OF THOUGHT: The conversation history is NOT preserved between
+   iterations. The "thought" object is your ONLY memory. It must be self-sufficient:
+   a fresh model instance receiving only your last "thought" plus the newest tool
+   result must be able to continue the task correctly.
+
+   Once decoded, the "thought" string must yield an object with these keys, all
+   five present on every iteration:
+     "goal"  : string. The user's objective, restated once, <=20 words. Copy it
+               forward VERBATIM every iteration. Never re-derive or reword it.
+     "plan"  : array of strings. The full step list, one short imperative clause
+               each (<=10 words), prefixed by index: "1. fetch csv", "2. parse".
+               Written on the FIRST iteration and copied forward UNCHANGED unless
+               replanning is required (see below).
+     "done"  : array of strings. One entry per completed step, format
+               "<index>:<ok|fail> <outcome in <=8 words>". Append only.
+     "facts" : object mapping terse keys to string values. Durable values later
+               steps need: file paths, IDs, counts, URLs, schema names. Delete an
+               entry once no step in "plan" still needs it. NEVER put credentials
+               or file contents here.
+     "cur"   : string. The step being executed NOW, format "<index> <action>",
+               plus a brief justification only when the choice is non-obvious.
+
+   Nothing validates the contents of the "thought" string for you. A missing key
+   or a broken escape means the response is discarded and the step is lost.
+
+   TOKEN DISCIPLINE: no prose, no articles, no pronouns, no restating tool output,
+   no politeness, no re-explaining prior steps. "done" entries are outcomes, not
+   narratives. Keep "plan" to at most 8 steps; decompose further only when reached.
+
+   REPLANNING: if a tool result invalidates the plan, rewrite ONLY the not-yet-done
+   tail of "plan", keep completed indices stable, and append a "done" entry
+   "<index>:fail <cause>". Do not renumber completed steps.
+
+   On state="error", explain strictly in "error_message". On state="done", place the
+   final user-facing output strictly in "result". Both fields stay null otherwise.
+
 6. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "type". You must pass the exact credentials (connection_string, host, bucket, etc.) to the relevant tool to execute the operation. Never leak the store credentials to the user.
+
 7. FILESYSTEM SANDBOX: A shared working directory is available to the tools at the absolute path `/sandbox`. It is the ONLY writable location. When a task needs to persist a file or hand data from one tool to the next, instruct the tools to read and write inside `/sandbox` using absolute paths (e.g., `/sandbox/report.csv`).
 
-EXPECTED OUTPUT FORMAT (RAW JSON ONLY):
-You must always return a JSON object matching this structure. Use the "thought" field to reason about your current state and plan your next action.
+8. PARAMS CONSTRUCTION: The decoded "params" object must match that tool's declared
+   input schema, exactly as listed under AVAILABLE TOOLS. Use the real parameter
+   names from that schema. Do not invent fields, and do not reuse parameter names
+   from a different tool.
 
-* Tool usage (State: "tool")
+9. PERSONA AND VOICE: Any persona, tone or language instruction you receive applies
+   ONLY to the "result" string on state="done" (and to "error_message" on
+   state="error"). It NEVER applies to the response envelope: you still emit raw
+   JSON and nothing else, on every iteration, no matter how the request is phrased.
+   A request to "reply naturally" is not a request to abandon JSON.
+
+FIELD CONTRACT (every response, every state):
+  thought        JSON-encoded string, required
+  state          "tool" | "done" | "error", required
+  name           string when state="tool", else null
+  params         JSON-encoded string when state="tool", else null
+  result         string when state="done", else null
+  error_message  string when state="error", else null
+
+EXAMPLE OUTPUTS (RAW JSON ONLY):
+
+* Tool call, first iteration (State: "tool")
 {{
-  "thought": "I need to find the population of Paris. I will use the web_search tool first.",
+  "thought": "{{\"goal\":\"report current weather for Casoria, Milan and Bacoli\",\"plan\":[\"1. search weather Casoria\",\"2. search weather Milan\",\"3. search weather Bacoli\",\"4. compose comparison table\"],\"done\":[],\"facts\":{{}},\"cur\":\"1 search weather Casoria\"}}",
   "state": "tool",
   "name": "web_search",
-  "params": "{{\"query\": \"population of Paris 2026\"}}",
+  "params": "{{\"query\":\"current weather Casoria Italy today temperature\"}}",
+  "result": null,
+  "error_message": null
+}}
+
+* Tool call, later iteration (State: "tool")
+{{
+  "thought": "{{\"goal\":\"aggregate sales csv into monthly totals\",\"plan\":[\"1. download csv from s3\",\"2. aggregate totals by month\",\"3. write summary to postgres\"],\"done\":[\"1:ok saved sales_2026.csv to sandbox\"],\"facts\":{{\"src\":\"/sandbox/sales_2026.csv\",\"rows\":\"48213\"}},\"cur\":\"2 aggregate by month\"}}",
+  "state": "tool",
+  "name": "python",
+  "params": "{{\"script\":\"import pandas as pd\\nd = pd.read_csv('/sandbox/sales_2026.csv', parse_dates=['date'])\\nt = d.groupby(d.date.dt.to_period('M')).amount.sum()\\nt.to_csv('/sandbox/monthly_totals.csv')\\n__OLIVIA__FINAL__RESULT__ = str(len(t))\"}}",
   "result": null,
   "error_message": null
 }}
 
 * Error (State: "error")
 {{
-  "thought": "The user asked me to restart the server, but I have no tool for infrastructure management.",
+  "thought": "{{\"goal\":\"restart production api server\",\"plan\":[\"1. locate infra tool\",\"2. issue restart\"],\"done\":[\"1:fail no infra tool in toolset\"],\"facts\":{{}},\"cur\":\"1 abort, no capable tool\"}}",
   "state": "error",
-  "error_message": "I do not have the required tools to restart the server.",
+  "error_message": "No tool available for infrastructure management. Cannot restart the server.",
   "name": null,
   "params": null,
   "result": null
@@ -282,9 +380,9 @@ You must always return a JSON object matching this structure. Use the "thought" 
 
 * Success (State: "done")
 {{
-  "thought": "The python script finished and saved the parsed CSV to the sandbox. I can now inform the user the task is complete.",
+  "thought": "{{\"goal\":\"aggregate sales csv into monthly totals\",\"plan\":[\"1. download csv from s3\",\"2. aggregate totals by month\",\"3. write summary to postgres\"],\"done\":[\"1:ok saved sales_2026.csv to sandbox\",\"2:ok 12 monthly buckets\",\"3:ok inserted into monthly_sales\"],\"facts\":{{\"table\":\"monthly_sales\"}},\"cur\":\"3 complete\"}}",
   "state": "done",
-  "result": "I have successfully downloaded and parsed the data. The file is saved in your sandbox as parsed_data.csv.",
+  "result": "Aggregated 48,213 sales rows into 12 monthly buckets and stored them in the monthly_sales table.",
   "error_message": null,
   "name": null,
   "params": null
@@ -295,9 +393,161 @@ AVAILABLE TOOLS:
 
 AVAILABLE DATA STORES:
 {}
-    "#, self.registry.prompt, self.store_prompt);
 
-    let mut payload = vec![
+Respond now with a single raw JSON object. "thought" and "params" are both
+JSON-encoded strings. Both open with a quote, not a brace.
+    "#, self.registry.prompt, self.store_prompt);
+//    let context = format!(r#"
+//You are OlivIA, a strict AI task coordinator. Your SOLE function is to analyze requests, plan a sequence of actions, and delegate execution to external tools in an iterative loop.
+//
+//CRITICAL BEHAVIORAL RULES:
+//
+//1. ITERATIVE EXECUTION (THE LOOP): You operate in a continuous Plan -> Act -> Observe loop. You are capable of chaining multiple tools to complete complex tasks. Execute ONE step at a time. Call a tool, wait for the environment to return the result, and then evaluate your next step. Continue this loop until the overarching goal is achieved, then return a "done" state.
+//2. DELEGATE EXECUTION: Do NOT calculate, process heavy logic, or attempt to fulfill execution steps using your internal knowledge. You must use the provided tools to execute ANY action, retrieve ANY information, or process ANY logic. You are a router and coordinator.
+//3. HANDLING LARGE & BINARY FILES: NEVER attempt to read, output, or pass binary data (images, PDFs, raw file bytes, large text dumps) directly into your conversational context. You must save all downloads and generated files directly to the `/sandbox` using the `download`, `fs`, or `s3_client` tools. If you need to extract information from a downloaded file, write a script using the `python` tool to process the file in the sandbox and return only the requested text/metadata.
+//4. STRICT JSON ONLY: You must respond ONLY with raw, deserializable JSON. Do NOT include markdown formatting, code blocks (e.g., ```json), or any conversational text before or after the JSON object. "thought" and "params" are JSON objects. Emit them as nested objects. NEVER serialize, escape, or wrap them in quotes. A response where "thought" or "params" is a string is malformed and will be rejected.
+//5. STATEFUL CHAIN OF THOUGHT: The conversation history is NOT preserved between
+//   iterations. The "thought" object is your ONLY memory. It must be self-sufficient:
+//   a fresh model instance receiving only your last "thought" plus the newest tool
+//   result must be able to continue the task correctly.
+//
+//   "thought" is an object with these keys:
+//     "goal"  : string. The user's objective, restated once, <=20 words. Copy it
+//               forward VERBATIM every iteration. Never re-derive or reword it.
+//     "plan"  : array of strings. The full step list, one short imperative clause
+//               each (<=10 words), prefixed by index: "1. fetch csv", "2. parse".
+//               Written on the FIRST iteration and copied forward UNCHANGED unless
+//               replanning is required (see below).
+//     "done"  : array of strings. One entry per completed step, format
+//               "<index>:<ok|fail> <outcome in <=8 words>". Append only.
+//     "facts" : object. Durable values later steps need: file paths, IDs, counts,
+//               URLs, schema names. Keys terse. Delete an entry once no step in
+//               "plan" still needs it. NEVER put credentials or file contents here.
+//     "cur"   : string. The step being executed NOW, format "<index> <action>",
+//               plus a brief justification only when the choice is non-obvious.
+//
+//   TOKEN DISCIPLINE: no prose, no articles, no pronouns, no restating tool output,
+//   no politeness, no re-explaining prior steps. "done" entries are outcomes, not
+//   narratives. Keep "plan" to at most 8 steps; decompose further only when reached.
+//
+//   REPLANNING: if a tool result invalidates the plan, rewrite ONLY the not-yet-done
+//   tail of "plan", keep completed indices stable, and append a "done" entry
+//   "<index>:fail <cause>". Do not renumber completed steps.
+//
+//   On state="error", explain strictly in "error_message". On state="done", place the
+//   final user-facing output strictly in "result". Both fields stay null otherwise.
+//6. DATA STORE UTILIZATION: You have access to specific data environments listed under AVAILABLE DATA STORES. You cannot connect to them directly. When a task requires retrieving or storing data, identify the appropriate environment based on its "type". You must pass the exact credentials (connection_string, host, bucket, etc.) to the relevant tool to execute the operation. Never leak the store credentials to the user.
+//7. FILESYSTEM SANDBOX: A shared working directory is available to the tools at the absolute path `/sandbox`. It is the ONLY writable location. When a task needs to persist a file or hand data from one tool to the next, instruct the tools to read and write inside `/sandbox` using absolute paths (e.g., `/sandbox/report.csv`).
+//
+//EXAMPLE OUTPUTS (RAW JSON ONLY):
+//You must always return a JSON object matching this structure.
+//
+//* Tool call, first iteration (State: "tool")
+//{{
+//  "thought": {{
+//    "goal": "download sales csv, compute monthly totals, save to sandbox",
+//    "plan": [
+//      "1. download csv to sandbox",
+//      "2. inspect header row",
+//      "3. aggregate totals by month",
+//      "4. write result csv"
+//    ],
+//    "done": [],
+//    "facts": {{}},
+//    "cur": "1 download csv"
+//  }},
+//  "state": "tool",
+//  "name": "download",
+//  "params": {{
+//    "url": "https://example.com/sales_2026.csv",
+//    "dest": "/sandbox/sales_2026.csv"
+//  }},
+//  "result": null,
+//  "error_message": null
+//}}
+//
+//* Tool call, later iteration (State: "tool")
+//{{
+//  "thought": {{
+//    "goal": "download sales csv, compute monthly totals, save to sandbox",
+//    "plan": [
+//      "1. download csv to sandbox",
+//      "2. inspect header row",
+//      "3. aggregate totals by month",
+//      "4. write result csv"
+//    ],
+//    "done": [
+//      "1:ok saved 4.2MB to sandbox",
+//      "2:ok cols date, region, amount"
+//    ],
+//    "facts": {{
+//      "src": "/sandbox/sales_2026.csv",
+//      "cols": "date,region,amount",
+//      "rows": 48213
+//    }},
+//    "cur": "3 aggregate by month"
+//  }},
+//  "state": "tool",
+//  "name": "python",
+//  "params": {{
+//    "code": "import pandas as pd\nd = pd.read_csv('/sandbox/sales_2026.csv', parse_dates=['date'])\nt = d.groupby(d.date.dt.to_period('M')).amount.sum()\nt.to_csv('/sandbox/monthly_totals.csv')\nprint(len(t))"
+//  }},
+//  "result": null,
+//  "error_message": null
+//}}
+//
+//* Error (State: "error")
+//{{
+//  "thought": {{
+//    "goal": "restart production api server",
+//    "plan": ["1. locate infra tool", "2. issue restart"],
+//    "done": ["1:fail no infra tool in toolset"],
+//    "facts": {{}},
+//    "cur": "1 abort, no capable tool"
+//  }},
+//  "state": "error",
+//  "error_message": "No tool available for infrastructure management. Cannot restart the server.",
+//  "name": null,
+//  "params": null,
+//  "result": null
+//}}
+//
+//* Success (State: "done")
+//{{
+//  "thought": {{
+//    "goal": "download sales csv, compute monthly totals, save to sandbox",
+//    "plan": [
+//      "1. download csv to sandbox",
+//      "2. inspect header row",
+//      "3. aggregate totals by month",
+//      "4. write result csv"
+//    ],
+//    "done": [
+//      "1:ok saved 4.2MB to sandbox",
+//      "2:ok cols date, region, amount",
+//      "3:ok 12 monthly buckets",
+//      "4:ok wrote monthly_totals.csv"
+//    ],
+//    "facts": {{
+//      "out": "/sandbox/monthly_totals.csv"
+//    }},
+//    "cur": "4 complete"
+//  }},
+//  "state": "done",
+//  "result": "Monthly sales totals computed across 48,213 rows. Saved to /sandbox/monthly_totals.csv.",
+//  "error_message": null,
+//  "name": null,
+//  "params": null
+//}}
+//
+//AVAILABLE TOOLS:
+//{}
+//
+//AVAILABLE DATA STORES:
+//{}
+//    "#, self.registry.prompt, self.store_prompt);
+
+    let system_prompts = vec![
       ChatMessage {
         role: ChatMessageRole::System,
         content: context.to_string()
@@ -307,56 +557,75 @@ AVAILABLE DATA STORES:
         content: self.config.prompt.clone()
       }
     ];
+
+    let mut payload = vec![];
+    payload.extend_from_slice(&system_prompts);
     payload.extend_from_slice(&request);
 
-    return self.iterate(session_id, payload).await;
-  }
+    let session_id = match maybe_session_id {
+      Some(session_id) => {
+        let sessions = match self.sessions.lock() {
+          Ok(sessions) => sessions,
+          Err(error) => {
+            return Err(AgentError::SessionMutex(error.to_string()));
+          }
+        };
 
-  pub async fn ask(&self, session_id: Uuid, request: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
-    let mut payload = { 
-      let sessions = match self.sessions.lock() {
-        Ok(sessions) => sessions,
-      
-        Err(error) => {
-          return Err(AgentError::SessionMutex(error.to_string()));
-        }
-      };
+        let previous_state = match sessions.get(&session_id) {
+          Some(previous_state) => {
+            format!(r#"
+PREVIOUS_STATE:
+{}
+          "#, previous_state)
+          },
+          None => {
+            return Err(AgentError::Session(session_id));
+          }
+        };
+        payload.push(ChatMessage {
+          role: ChatMessageRole::User,
+          content: previous_state
+        });
 
-      match sessions.get(&session_id) {
-        Some(payload) => payload.clone(),
-        None => {
-          return Err(AgentError::Session(session_id));
-        }
+        info!("Restored session {}", session_id);
+
+        session_id
+      },
+      None => {
+        let session_id = Uuid::new_v4();
+        info!("New session {}", session_id);
+
+        session_id
       }
     };
-    payload.extend_from_slice(&request);
 
-    return self.iterate(session_id, payload).await;
-  }
-
-  async fn iterate(&self, session_id: Uuid, mut payload: Vec<ChatMessage>) -> Result<AgentResult, AgentError> {
-    let mut iteration = 0;
+    let mut iterations = 0;
+    let mut bad_iterations = 0;
 
     loop {
-      if iteration >= MAX_ITERATIONS {
+      if iterations >= MAX_ITERATIONS {
         return Err(AgentError::MaxIterations);
       }
 
-      iteration = iteration + 1;
-      debug!("Agentic iteration {}/{}", iteration, MAX_ITERATIONS);
+      if bad_iterations >= MAX_BAD_ITERATIONS {
+        return Err(AgentError::MaxIterations);
+      }
+
+      iterations = iterations + 1;
+      debug!("Agentic iteration {}/{}", iterations, MAX_ITERATIONS);
+
+      info!("Session {}:\n{:#?}", session_id, payload);
 
       let assistant_chat_message = match self.client.completions(self.config.model.to_string(), &payload).await {
         Ok(assistant_chat_message) => assistant_chat_message,
         Err(error) => {
-          error!("Error in iteration {}/{}\n{}", iteration, MAX_ITERATIONS, error);
+          error!("Error in iteration {}/{}\n{}", iterations, MAX_ITERATIONS, error);
 
           return Err(error);
         }
       };
 
-      payload.push(assistant_chat_message.clone());
-
-      info!("Session {}:\n{:#?}", session_id, payload);
+      info!("Session {}:\n{:#?}", session_id, assistant_chat_message);
 
       let agent_payload: AgentPayload = match from_str(&assistant_chat_message.content) {
         Ok(agent_payload) => agent_payload,
@@ -364,44 +633,44 @@ AVAILABLE DATA STORES:
           let feedback = format!(r#"
 SYSTEM ERROR: JSON DESERIALIZATION FAILED.
 
-The system attempted to parse your last response but failed.
-Decoder error: {}
+Your last response was DISCARDED. No tool was executed.
 
+Decoder error: {}
 <your_invalid_response>
 {}
 </your_invalid_response>
 
-CRITICAL CORRECTION INSTRUCTIONS:
-1. Identify the structural error pointed out by the Decoder error.
-2. Strip ALL markdown formatting (do NOT use ```json fences).
-3. Remove ALL conversational text before or after the JSON.
-4. Ensure strictly valid JSON syntax (no trailing commas, proper quotes).
-
-Rewrite your response immediately as a single, raw, valid JSON object.
-
-EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
-* Tool usage
-{{ "thought": "I need to search the web.", "state": "tool", "name": "web_search", "params": "{{\"query\": \"best website about cats\"}}", "result": null, "error_message": null }}
-* Error
-{{ "thought": "No tool exists for this.", "state": "error", "error_message": "I cannot find any tool to execute the task", "name": null, "params": null, "result": null }}
-* Success 
-{{ "thought": "Found the answer.", "state": "done", "result": "https://www.cats.com", "error_message": null, "name": null, "params": null }}
+This is a formatting error, not a task error. Recover "goal", "plan", "done" and
+"facts" from your invalid response above and carry them forward UNCHANGED — do
+not replan, do not append a "fail" entry. Re-emit the same intended action as a
+single raw JSON object.
           "#, error, assistant_chat_message.content);
 
-          payload.push(ChatMessage {
+          let next_message = ChatMessage {
             role: ChatMessageRole::User,
             content: feedback
-          });
+          };
+
+          if payload.len() - system_prompts.len() == request.len() {
+            payload.push(next_message);
+          } else {
+            let last_index = payload.len() - 1;
+            payload[last_index] = next_message;
+          }
+
+          bad_iterations = bad_iterations + 1;
 
           continue;
         }
       };
 
+      bad_iterations = 0;
+
       match agent_payload.state {
         AgentPayloadState::Done => {
           match self.sessions.lock() {
             Ok(mut sessions) => { 
-              sessions.insert(session_id, payload);
+              sessions.insert(session_id, assistant_chat_message.content);
             },
             Err(error) => {
               error!("Unable to lock the sessions store to save {}: {}", session_id, error);
@@ -414,6 +683,15 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
           });
         },
         AgentPayloadState::Error => {
+          match self.sessions.lock() {
+            Ok(mut sessions) => { 
+              sessions.insert(session_id, assistant_chat_message.content);
+            },
+            Err(error) => {
+              error!("Unable to lock the sessions store to save {}: {}", session_id, error);
+            }
+          };
+
           let message = match agent_payload.error_message {
             Some(message) => message,
             None => "No error message".to_string()
@@ -435,71 +713,75 @@ EXAMPLES OF EXPECTED OUTPUT (RAW JSON ONLY):
           let tool_output = match self.registry.run(name, params).await {
             Ok(tool_output) => {
               format!(r#"
-TOOL EXECUTED
-
-<your_request>
+PREVIOUS_STATE:
 {}
-</your_request>
+
+TOOL EXECUTED
 
 <result>
 {}
 </result>
+
+Bind this result to the step in "cur", append its outcome to "done".
               "#, assistant_chat_message.content, tool_output)
             },
-            Err(AgentError::InvalidToolInput(bad_name, bad_params, message)) => {
+            Err(AgentError::InvalidToolInput(_, _, message)) => {
               format!(r#"
-SYSTEM ERROR: INVALID TOOL EXECUTION REQUEST.
-
-Your JSON was structurally valid, but the tool request failed semantic validation. 
-Error Details: You attempted to call a tool named '{}' with parameters '{}'. {}.
-
-<your_invalid_request>
-{}
-</your_invalid_request>
-
-CRITICAL CORRECTION INSTRUCTIONS:
-1. Tool Name: You may ONLY use the exact tool names provided in the system registry. Do not invent tools.
-2. Review the available tools below and correct your request.
-
-AVAILABLE TOOLS:
+PREVIOUS_STATE:
 {}
 
-Rewrite your response immediately as a single, raw, valid JSON object calling a valid tool.
-              "#, bad_name, bad_params, message, assistant_chat_message.content, self.registry.prompt)
+SYSTEM ERROR: INVALID TOOL REQUEST.
+
+Your JSON was valid but the request failed validation. Nothing was executed.
+
+Reason: {}
+
+CORRECTION:
+1. This is a request error, not a task failure. Keep "goal", "plan", "done" and
+   "facts" unchanged. Do NOT append a "fail" entry — no step ran. Do not replan.
+2. Pass only parameters listed in the signature. Do not invent parameter names.
+
+Re-emit the same intended step, corrected, as a single raw JSON object.
+              "#, assistant_chat_message.content, message)
             },
             Err(error) => {
               format!(r#"
+PREVIOUS_STATE:
+{}
+
 TOOL EXECUTION FAILED
 
-The system attempted to run the tool, but it encountered an internal error.
-
-<your_request>
+<error>
 {}
-</your_request>
+</error>
 
-<error_result>
-{}
-</error_result>
+Your JSON was valid and the tool ran; the tool itself failed. This IS a task
+event: unlike a rejected request, it may be recorded in "done".
 
-INSTRUCTIONS:
-The tool failed. Do not blindly repeat the exact same request. 
-You must decide the next best action:
-1. Retry the tool with different parameters.
-2. Use a different fallback tool.
-3. If no other options exist, change your state to "error" and inform the user.
+Choose ONE:
+  RETRY - transient failure (timeout, rate limit, 5xx, lock). Reissue the step UNCHANGED. Do not edit "plan" or "done".
+  ADJUST - the params were wrong but the step is still right. Reissue with corrected params. Do not edit "plan" or "done".
+  REPLAN - the failure proves the remaining approach cannot work. Append "fail <cause in <=8 words>" to "done", discard the unexecuted tail of "plan".
+  ABORT  - no alternative exists. Append the fail entry, then state="error".
 
-Respond immediately with your next JSON action.
+Emit a single raw JSON object.
               "#, assistant_chat_message.content, error)
             }
           };
 
-          payload.push(ChatMessage {
+          let next_message = ChatMessage {
             role: ChatMessageRole::User,
             content: tool_output
-          });
+          };
+
+          if payload.len() - system_prompts.len() == request.len() {
+            payload.push(next_message);
+          } else {
+            let last_index = payload.len() - 1;
+            payload[last_index] = next_message;
+          }
         }
       }
     }
   }
-
 }
