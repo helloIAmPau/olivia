@@ -716,6 +716,18 @@ dependencies = [
 
 [[package]]
 name = "http"
+version = "0.0.1"
+dependencies = [
+ "common",
+ "schemars",
+ "serde",
+ "serde_json",
+ "waki",
+ "wit-bindgen 0.60.0",
+]
+
+[[package]]
+name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
@@ -2657,7 +2669,7 @@ checksum = "6e2db2daf1dfbadf228fd8b3c22b96a359135fd673b3d2c203274ee6a0df9c77"
 dependencies = [
  "anyhow",
  "form_urlencoded",
- "http",
+ "http 1.5.0",
  "serde",
  "serde_json",
  "waki-macros",
