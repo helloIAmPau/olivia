@@ -1,18 +1,20 @@
 const DEFAULT_CONFIG_PATH: &str = "/config.toml";
 const DEFAULT_TOOLS_FOLDER: &str = "/tools";
+const DEFAULT_SANDBOX_FOLDER: &str = "/sandbox";
 
 pub struct CliOptions {
   pub config_path: String,
-  pub tools_folder: String
+  pub tools_folder: String,
+  pub sandbox_folder: String
 }
 
 pub fn resolve() -> CliOptions {
   let mut config_path = DEFAULT_CONFIG_PATH.to_string();
   let mut tools_folder = DEFAULT_TOOLS_FOLDER.to_string();
+  let mut sandbox_folder = DEFAULT_SANDBOX_FOLDER.to_string();
 
   let mut args = std::env::args();
 
-  // Skip the program name.
   let _ = args.next();
 
   loop {
@@ -34,12 +36,14 @@ pub fn resolve() -> CliOptions {
     match key {
       "config" => config_path = value.to_string(),
       "tools" => tools_folder = value.to_string(),
+      "sandbox" => sandbox_folder = value.to_string(),
       _ => panic!("Unknown option '--{}'", key)
     };
   }
 
   return CliOptions {
     config_path,
-    tools_folder
+    tools_folder,
+    sandbox_folder
   };
 }

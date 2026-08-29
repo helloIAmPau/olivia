@@ -13,8 +13,6 @@ use serde::Deserialize;
 
 use common::define_tool;
 
-const SANDBOX_PATH: &str = "/sandbox";
-
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum FsOperation {
@@ -34,8 +32,8 @@ enum FsKind {
 struct FsParams {
   /// The operation to perform: "list" (list the entries of a directory), "create" (create a file or directory) or "delete" (remove a file or directory, recursively for directories).
   operation: FsOperation,
-  /// The path to operate on, relative to the /sandbox directory (e.g. reports or reports/2026.txt). Leading slashes are ignored and it must not contain "..". An empty path, "." or "/" refers to the sandbox root. For "list" it defaults to the sandbox root when omitted.
-  path: Option<String>,
+  /// The absolute path to operate on inside the sandbox, e.g. /sandbox/reports or /sandbox/reports/2026.txt.
+  path: String,
   /// What to create: "file" or "directory". Required for the "create" operation; ignored otherwise.
   kind: Option<FsKind>,
   /// The text content to write when creating a file. Optional: when omitted an empty file is created. Ignored for directories and for other operations.
@@ -43,22 +41,7 @@ struct FsParams {
 }
 
 fn run(input: FsParams) -> ToolOutput {
-  let raw = match input.path {
-    Some(path) => path,
-    None => String::new()
-  };
-
-  let trimmed = raw.trim();
-  let target = if trimmed.is_empty() || trimmed == "." || trimmed == "/" {
-    SANDBOX_PATH.to_string()
-  } else if trimmed.contains("..") {
-    return ToolOutput {
-      state: ToolOutputState::Error,
-      content: format!("Invalid path {}: it must not contain '..'", raw)
-    };
-  } else {
-    format!("{}/{}", SANDBOX_PATH, trimmed.trim_start_matches('/'))
-  };
+  let target = input.path;
 
   match input.operation {
     FsOperation::List => {
@@ -180,13 +163,6 @@ fn run(input: FsParams) -> ToolOutput {
       }
     },
     FsOperation::Delete => {
-      if target == SANDBOX_PATH {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: "Refusing to delete the sandbox root".to_string()
-        };
-      }
-
       let meta = match metadata(&target) {
         Ok(meta) => meta,
         Err(error) => {
@@ -235,7 +211,7 @@ fn run(input: FsParams) -> ToolOutput {
 define_tool!(
   Fs,
   FsParams,
-  "Manages files and directories inside the shared /sandbox working directory. Supports three operations selected via the `operation` field: \"list\" returns the entries (each prefixed with `dir ` or `file`) of the directory at `path` (defaults to the sandbox root); \"create\" makes a new file or directory at `path` depending on `kind` (\"file\" or \"directory\"), optionally writing `content` into a file and creating any missing parent directories; \"delete\" removes the file or directory at `path` (directories are removed recursively). All paths are relative to /sandbox, must not contain \"..\", and cannot escape the sandbox. Use it to inspect what other tools have written, to lay out folders, and to clean up files.",
+  "Manages files and directories inside the shared /sandbox working directory. Supports three operations selected via the `operation` field: \"list\" returns the entries (each prefixed with `dir ` or `file`) of the directory at `path`; \"create\" makes a new file or directory at `path` depending on `kind` (\"file\" or \"directory\"), optionally writing `content` into a file and creating any missing parent directories; \"delete\" removes the file or directory at `path` (directories are removed recursively). `path` is always an absolute path inside the sandbox, e.g. /sandbox/reports/2026.txt. Use it to inspect what other tools have written, to lay out folders, and to clean up files.",
   vec![Permission::FileSystem],
   run
 );

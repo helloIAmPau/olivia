@@ -10,9 +10,6 @@ use waki::Client;
 
 use common::define_tool;
 
-// Shared working directory preopened for every tool; downloads are saved here.
-const SANDBOX_PATH: &str = "/sandbox";
-
 #[derive(Deserialize, JsonSchema)]
 struct DownloadParams {
   /// The body of a JavaScript module that default-exports an async function
@@ -27,10 +24,9 @@ struct DownloadParams {
   /// Example (force-download a URL):
   /// export default async function ({ page }) { await page.goto('https://example.com'); await page.evaluate(() => { const a = document.createElement('a'); a.href = 'https://example.com/report.pdf'; a.download = ''; document.body.appendChild(a); a.click(); }); await new Promise(r => setTimeout(r, 5000)); }
   code: String,
-  /// The name to save the downloaded file under, inside the /sandbox directory
-  /// (e.g. report.pdf). Must be a plain file name: no directory separators and
-  /// no "..".
-  filename: String
+  /// The absolute path to save the downloaded file to inside the sandbox
+  /// (e.g. /sandbox/report.pdf). Missing parent directories are NOT created.
+  path: String
 }
 
 #[derive(Serialize)]
@@ -53,14 +49,6 @@ fn run(input: DownloadParams) -> ToolOutput {
     Ok(host) => host,
     Err(_) => "http://browserless:3000".to_string()
   };
-
-  // Keep the write confined to the sandbox: reject anything that could escape it.
-  if input.filename.is_empty() || input.filename.contains('/') || input.filename.contains("..") {
-    return ToolOutput {
-      state: ToolOutputState::Error,
-      content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", input.filename)
-    };
-  }
 
   let endpoint = format!("{}/download", host);
   let payload = FunctionRequest {
@@ -98,7 +86,7 @@ fn run(input: DownloadParams) -> ToolOutput {
     };
   }
 
-  let path = format!("{}/{}", SANDBOX_PATH, input.filename);
+  let path = input.path;
   let size = bytes.len();
 
   println!("[download] Saving {} bytes to {}", size, path);
@@ -122,7 +110,7 @@ fn run(input: DownloadParams) -> ToolOutput {
 define_tool!(
   Download,
   DownloadParams,
-  "Downloads a file through the browserless /download API and saves it into the /sandbox directory. Provide the body of a JavaScript module that default-exports an async function receiving { page } (a Puppeteer Page) plus the filename to save it under in /sandbox. The function MUST trigger a real browser download event — click an existing download link, or create an anchor with a `download` attribute and click it — because a plain page.goto(fileUrl) does NOT download (Chrome renders PDFs/images inline). Browserless captures whatever file the page downloads and this tool writes its bytes to /sandbox/<filename>, returning the saved path. Use it to fetch documents, images, PDFs or other binary files — especially ones behind JavaScript, forms or auth — so other tools can read them from the sandbox afterwards.",
+  "Downloads a file through the browserless /download API and saves it into the sandbox. Provide the body of a JavaScript module that default-exports an async function receiving { page } (a Puppeteer Page) plus the absolute path to save it to (e.g. /sandbox/report.pdf). The function MUST trigger a real browser download event — click an existing download link, or create an anchor with a `download` attribute and click it — because a plain page.goto(fileUrl) does NOT download (Chrome renders PDFs/images inline). Browserless captures whatever file the page downloads and this tool writes its bytes to the given path, returning it. Use it to fetch documents, images, PDFs or other binary files — especially ones behind JavaScript, forms or auth — so other tools can read them from the sandbox afterwards.",
   vec![Permission::Network, Permission::FileSystem],
   run
 );

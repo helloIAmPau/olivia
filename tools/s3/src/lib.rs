@@ -18,10 +18,6 @@ use rusty_s3::actions::ListObjectsV2;
 
 use common::define_tool;
 
-// Shared working directory preopened for every tool; uploads are read from here
-// and downloads are written here.
-const SANDBOX_PATH: &str = "/sandbox";
-
 #[derive(Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum S3Operation {
@@ -47,8 +43,8 @@ struct S3ClientParams {
   operation: S3Operation,
   /// The object key (its path within the bucket), e.g. reports/2026.txt. Required for create, delete and download; ignored for list.
   key: Option<String>,
-  /// The name of the file inside the /sandbox directory to upload (for create) or to save the downloaded object as (for download), e.g. report.pdf. Required for create and download; ignored otherwise. Must be a plain file name: no directory separators and no "..".
-  filename: Option<String>
+  /// The absolute path of the sandbox file to upload (for create) or to save the downloaded object to (for download), e.g. /sandbox/report.pdf. Required for create and download; ignored otherwise.
+  path: Option<String>
 }
 
 const EXPIRES: Duration = Duration::from_secs(300);
@@ -161,24 +157,16 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let filename = match input.filename {
-        Some(filename) => filename,
+      let path = match input.path {
+        Some(path) => path,
         None => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: "The 'create' operation requires a 'filename' to upload from the sandbox".to_string()
+            content: "The 'create' operation requires a 'path' to upload from the sandbox".to_string()
           };
         }
       };
 
-      if filename.is_empty() || filename.contains('/') || filename.contains("..") {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", filename)
-        };
-      }
-
-      let path = format!("{}/{}", SANDBOX_PATH, filename);
       let content = match read(&path) {
         Ok(content) => content,
         Err(error) => {
@@ -269,22 +257,15 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let filename = match input.filename {
-        Some(filename) => filename,
+      let path = match input.path {
+        Some(path) => path,
         None => {
           return ToolOutput {
             state: ToolOutputState::Error,
-            content: "The 'download' operation requires a 'filename' to save into the sandbox".to_string()
+            content: "The 'download' operation requires a 'path' to save into the sandbox".to_string()
           };
         }
       };
-
-      if filename.is_empty() || filename.contains('/') || filename.contains("..") {
-        return ToolOutput {
-          state: ToolOutputState::Error,
-          content: format!("Invalid filename {}: it must be a plain file name with no '/' or '..'", filename)
-        };
-      }
 
       let action = bucket.get_object(Some(&credentials), &key);
       let url = action.sign(EXPIRES);
@@ -309,7 +290,6 @@ fn run(input: S3ClientParams) -> ToolOutput {
         }
       };
 
-      let path = format!("{}/{}", SANDBOX_PATH, filename);
       let size = bytes.len();
 
       match write(&path, &bytes) {
@@ -333,7 +313,7 @@ fn run(input: S3ClientParams) -> ToolOutput {
 define_tool!(
   S3Client,
   S3ClientParams,
-  "Manages files in an S3-compatible object store (AWS S3, RustFS, MinIO, ...) over its HTTP API using presigned requests, exchanging file contents through the /sandbox directory. Pass the exact bucket, region, endpoint, access_key and secret_key from the AVAILABLE DATA STORES section plus an operation: 'list' lists the objects in the bucket, 'create' uploads the sandbox file named by 'filename' to object 'key', 'delete' removes object 'key', and 'download' saves object 'key' into the sandbox as 'filename'. Use it to persist, retrieve or manage documents, blobs and other files rather than structured relational data.",
+  "Manages files in an S3-compatible object store (AWS S3, RustFS, MinIO, ...) over its HTTP API using presigned requests, exchanging file contents through the sandbox. Pass the exact bucket, region, endpoint, access_key and secret_key from the AVAILABLE DATA STORES section plus an operation: 'list' lists the objects in the bucket, 'create' uploads the sandbox file at absolute 'path' to object 'key', 'delete' removes object 'key', and 'download' saves object 'key' into the sandbox at absolute 'path'. Use it to persist, retrieve or manage documents, blobs and other files rather than structured relational data.",
   vec![Permission::Network, Permission::FileSystem],
   run
 );

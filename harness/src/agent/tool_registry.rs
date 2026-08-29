@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use uuid::Uuid;
+
 use tokio::fs::read_dir;
 
 use tracing::info;
@@ -17,11 +19,11 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-  pub async fn new(tools_folder: &str) -> Result<Self, AgentError> {
+  pub async fn new(tools_folder: &str, sandbox_folder: &str) -> Result<Self, AgentError> {
     info!("Loading tools from folder {}", tools_folder);
     let mut tools = HashMap::new();
     let mut prompt = "".to_string();
-    let engine = match ToolEngine::new().await {
+    let engine = match ToolEngine::new(sandbox_folder).await {
       Ok(engine) => engine,
       Err(error) => {
         return Err(error);
@@ -76,7 +78,7 @@ impl ToolRegistry {
     });
   }
 
-  pub async fn run(&self, name: String, params: String) -> Result<String, AgentError> {
+  pub async fn run(&self, name: String, params: String, session_id: &Uuid) -> Result<String, AgentError> {
     info!("Received request to run tool {} with params: {}", name, params);
 
     let tool = match self.tools.get(&name) {
@@ -86,7 +88,7 @@ impl ToolRegistry {
       }
     };
 
-    let output = match tool.run(params).await {
+    let output = match tool.run(params, session_id).await {
       Ok(output) => output,
       Err(error) => {
         return Err(AgentError::Tool(error.to_string()));

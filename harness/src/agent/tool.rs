@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::env::vars;
+use std::fs::create_dir_all;
+
+use uuid::Uuid;
 
 use tracing::info;
 use tracing::error;
@@ -36,7 +39,7 @@ bindgen!({
   exports: { default: async }
 });
 
-const SANDBOX_PATH: &str = "/sandbox";
+pub const GUEST_SANDBOX_PATH: &str = "/sandbox";
 
 struct ToolHooks;
 
@@ -50,7 +53,7 @@ struct ToolState {
 }
 
 impl ToolState {
-  fn new(permissions: Vec<Permission>) -> Self {
+  fn new(permissions: Vec<Permission>, session_id: &Uuid, sandbox: &str) -> Self {
     let mut builder = WasiCtx::builder();
     builder.inherit_stdout();
     builder.inherit_stderr();
@@ -62,10 +65,19 @@ impl ToolState {
           builder.allow_ip_name_lookup(true);
         }
         Permission::FileSystem => {
-          match builder.preopened_dir(SANDBOX_PATH, SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
+          let session_sandbox = format!("{}/{}", sandbox, session_id);
+
+          match create_dir_all(&session_sandbox) {
             Ok(_) => {},
             Err(error) => {
-              error!("Unable to preopen the sandbox directory {}: {}", SANDBOX_PATH, error);
+              error!("Unable to create the session sandbox directory {}: {}", session_sandbox, error);
+            }
+          };
+
+          match builder.preopened_dir(&session_sandbox, GUEST_SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
+            Ok(_) => {},
+            Err(error) => {
+              error!("Unable to preopen the sandbox directory {}: {}", session_sandbox, error);
             }
           };
         }
@@ -115,11 +127,12 @@ impl WasiHttpView for ToolState {
 
 pub struct ToolEngine {
   wasm: Engine,
-  linker: Linker<ToolState>
+  linker: Linker<ToolState>,
+  sandbox: String
 }
 
 impl ToolEngine {
-  pub async fn new() -> Result<Self, AgentError> {
+  pub async fn new(sandbox: &str) -> Result<Self, AgentError> {
     let mut config = Config::new();
     config.wasm_component_model(true);
 
@@ -146,7 +159,8 @@ impl ToolEngine {
 
     return Ok(Self {
       wasm,
-      linker
+      linker,
+      sandbox: sandbox.to_string()
     });
   }
 }
@@ -166,7 +180,7 @@ impl Tool {
       }
     };
 
-    let info = match Tool::bindings(vec![], engine.clone(), &component, async |bindings, store| {
+    let info = match Tool::bindings(vec![], &Uuid::nil(), engine.clone(), &component, async |bindings, store| {
       return bindings.call_info(store).await;
     }).await {
       Ok(info) => info,
@@ -182,8 +196,8 @@ impl Tool {
     });
   }
 
-  pub async fn run(&self, params: String) -> Result<ToolOutput, AgentError> {
-    let result = match Tool::bindings(self.info.permissions.clone(), self.engine.clone(), &self.component, async |bindings, store| {
+  pub async fn run(&self, params: String, session_id: &Uuid) -> Result<ToolOutput, AgentError> {
+    let result = match Tool::bindings(self.info.permissions.clone(), session_id, self.engine.clone(), &self.component, async |bindings, store| {
       return bindings.call_run(store, &params).await;
     }).await {
       Ok(result) => result,
@@ -195,8 +209,8 @@ impl Tool {
     return Ok(result);
   }
 
-  async fn bindings<T>(permissions: Vec<Permission>, engine: Arc<ToolEngine>, component: &Component, call: impl AsyncFnOnce(ToolWorld, &mut Store<ToolState>) -> wasmtime::Result<T>) -> Result<T, AgentError> {
-    let state = ToolState::new(permissions);
+  async fn bindings<T>(permissions: Vec<Permission>, session_id: &Uuid, engine: Arc<ToolEngine>, component: &Component, call: impl AsyncFnOnce(ToolWorld, &mut Store<ToolState>) -> wasmtime::Result<T>) -> Result<T, AgentError> {
+    let state = ToolState::new(permissions, session_id, &engine.sandbox);
     let mut store = Store::new(&engine.wasm, state);
 
     let bindings = match ToolWorld::instantiate_async(&mut store, component, &engine.linker).await {
