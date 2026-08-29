@@ -1132,6 +1132,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "reqwest 0.13.4",
+ "rustls",
  "schemars 1.2.2",
  "serde",
  "serde_json",

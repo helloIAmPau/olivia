@@ -133,6 +133,14 @@ pub struct ToolEngine {
 
 impl ToolEngine {
   pub async fn new(sandbox: &str) -> Result<Self, AgentError> {
+    // wasmtime-wasi-http performs outbound TLS with rustls, which refuses to pick
+    // a crypto backend on its own. Install one process-wide before any tool can
+    // make an HTTPS request. Err means a provider is already installed, fine.
+    match rustls::crypto::ring::default_provider().install_default() {
+      Ok(_) => {},
+      Err(_) => {}
+    };
+
     let mut config = Config::new();
     config.wasm_component_model(true);
 

@@ -27,3 +27,8 @@ uuid = { version = "1.24.0", features = ["v4", "serde"] }
 wasmtime = { version = "47.0.3", features = ["component-model", "async"] }
 wasmtime-wasi = "47.0.3"
 wasmtime-wasi-http = "47.0.3"
+
+# wasmtime-wasi-http does outbound TLS with rustls 0.23, which needs a crypto
+# provider selected. Pull rustls in with the `ring` backend and install it as the
+# process default in main() before any tool makes an HTTPS request.
+rustls = { version = "0.23", features = ["ring"] }
