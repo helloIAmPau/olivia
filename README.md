@@ -15,6 +15,7 @@
     <img src="https://img.shields.io/badge/plugins-WebAssembly%20components-654ff0" alt="WebAssembly components">
     <img src="https://img.shields.io/badge/runtime-wasmtime-4d4dff" alt="wasmtime">
     <img src="https://img.shields.io/badge/status-WIP-yellow" alt="Status: WIP">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
   </p>
 </div>
 
@@ -671,8 +672,7 @@ its own environment.
 
 ## License
 
-No license has been chosen for this project yet. Until a `LICENSE` file is added,
-all rights are reserved by the authors.
+Released under the [MIT License](LICENSE) — © 2026 Pasquale Boemio.
 
 ### Contribution
 
