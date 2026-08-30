@@ -102,10 +102,13 @@ the ABI is checked at compile time rather than hand-marshalled:
 package olivia:tools;
 
 world tool-world {
+  enum permission { network, file-system }
+
   record tool-info {
     name: string,
     description: string,
-    schema: string          // JSON Schema for this tool's params
+    schema: string,               // JSON Schema for this tool's params
+    permissions: list<permission> // capabilities the sandbox must grant
   }
 
   enum tool-output-state { done, error }
@@ -121,9 +124,11 @@ world tool-world {
 ```
 
 - **`info()`** is called once at load time and returns the tool's `name`,
-  human-readable `description`, and a JSON Schema for its parameters. The harness
-  uses this to build its registry and to tell the model which tools exist and how
-  to call them.
+  human-readable `description`, a JSON Schema for its parameters, and the list of
+  `permissions` (capabilities) it needs. The harness uses this to build its
+  registry, to tell the model which tools exist and how to call them, and to
+  decide which capabilities to grant the tool's sandbox — a tool receives nothing
+  it did not declare here.
 - **`run(input)`** is called when the model routes a request to this tool. It
   receives a JSON string of parameters (matching the schema) and returns a
   `tool-output` whose `state` reports success or failure and whose `content`
@@ -159,6 +164,7 @@ elsewhere. Options are accepted only in `--key=value` form:
 | ------ | ------- | ----------- |
 | `--config=<path>` | `/config.toml` | The TOML config file to load. |
 | `--tools=<folder>` | `/tools` | The folder scanned for `*.wasm` tools. |
+| `--sandbox=<folder>` | `/sandbox` | Host base directory for per-session sandboxes; each session gets `<folder>/<session_id>`, mounted into file-system tools at `/sandbox`. |
 
 ```sh
 harness --config=/examples/hello.toml --tools=/tools
@@ -177,14 +183,15 @@ context.
 Every run is identified by a **session id** (a UUID). Two entry points on the
 agent decide whether a run starts fresh or continues an existing one:
 
-- **`accept(request)`** mints a new UUID, prepends the router system prompt, and
-  runs the agentic loop from scratch.
-- **`ask(session_id, request)`** looks up a stored message chain by id, appends
-  the new messages to it, and continues the loop with the full history.
+- **`accept(request, None)`** mints a new UUID, prepends the router system
+  prompt, and runs the agentic loop from scratch.
+- **`accept(request, Some(id))`** looks up a stored message chain by id, appends
+  the new messages to it, and continues the loop with the full history (an
+  unknown id returns an `Invalid session id` error).
 
 When a run finishes with `done`, the agent stores its complete message chain
 (system prompt, every model turn, and every tool result) under the session id
-before returning. A later `ask` for that id replays the whole exchange, so the
+before returning. A later `accept` with that id replays the whole exchange, so the
 model sees everything that happened. Runs that end in `error` are **not** saved,
 and the store is an in-memory map — sessions do not survive a harness restart.
 
@@ -201,10 +208,9 @@ Each service exposes this differently:
 
 - **HTTP** — the response is `{ "error": …, "data": { "session_id", "payload" } }`.
   To continue a conversation, send the id back on the next request in the
-  `OLIVIA-SESSION-ID` header; the harness parses it, restores the session, and
-  calls `ask`. A request with no (or an unparseable) header starts a fresh
-  session via `accept`; a well-formed id that isn't in the store returns an
-  `Invalid session id` error.
+  `OLIVIA-SESSION-ID` header; the harness parses it and continues that session.
+  A request with no (or an unparseable) header starts a fresh session; a
+  well-formed id that isn't in the store returns an `Invalid session id` error.
 - **Telegram** — `/do <text>` starts a session and the bot remembers it per
   chat, so any **plain follow-up message** continues that conversation
   automatically. Messaging before you have run `/do` replies with `Unable to
@@ -309,11 +315,12 @@ forwards its connection details to the matching tool (`postgres_client` /
 | `python` | `tools/python/` | `{ "script": … }` | Runs a Python 3 script in an embedded [RustPython](https://rustpython.github.io/) interpreter inside the wasm sandbox. |
 | `web_search` | `tools/search/` | `{ "query": … }` | Searches the web via a [SearXNG](https://docs.searxng.org/) instance and returns the JSON results. |
 | `web` | `tools/web/` | `{ "code": … }` | Drives a headless browser through the [Browserless](https://www.browserless.io/) `/function` API (stealth mode on): runs a Puppeteer function you supply and returns its output. |
-| `download` | `tools/download/` | `{ "code": …, "filename": … }` | Triggers a browser download through Browserless `/download` and writes the file's bytes to `/sandbox/<filename>`. The `code` must fire a real download (click a link / click an `<a download>`) — `page.goto(fileUrl)` alone does not download. |
-| `fs` | `tools/fs/` | `{ "operation": …, "path": …, "kind": …, "content": … }` | Manages files and directories inside `/sandbox`. `operation` ∈ `list` (entries of `path`, each prefixed `dir `/`file`) / `create` (a `file` or `directory` per `kind`, writing optional `content` and any missing parents) / `delete` (recursive for directories). Paths are relative to `/sandbox`, may not contain `..`, and cannot escape it. |
+| `http` | `tools/http/` | `{ "method": …, "url": …, "headers": …, "body": … }` | Makes a direct HTTP request to any URL and returns the status line plus the response body. `method` ∈ `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`; optional `headers` (name/value pairs) and `body`. Any status (incl. `4xx`/`5xx`) comes back as a result; only network-level failures error. For pages needing a real browser, use `web`. |
+| `download` | `tools/download/` | `{ "code": …, "path": … }` | Triggers a browser download through Browserless `/download` and writes the file's bytes to the absolute sandbox `path` (e.g. `/sandbox/report.pdf`). The `code` must fire a real download (click a link / click an `<a download>`) — `page.goto(fileUrl)` alone does not download. |
+| `fs` | `tools/fs/` | `{ "operation": …, "path": …, "kind": …, "content": … }` | Manages files and directories inside the sandbox. `operation` ∈ `list` (entries of `path`, each prefixed `dir `/`file`) / `create` (a `file` or `directory` per `kind`, writing optional `content` and any missing parents) / `delete` (recursive for directories). `path` is an absolute sandbox path, e.g. `/sandbox/reports/2026.txt`. |
 | `postgres_client` | `tools/postgres/` | `{ "connection_string": …, "query": … }` | Runs one SQL statement against a PostgreSQL store and returns the result as CSV. Speaks the v3 wire protocol directly over `std::net`. |
 | `clickhouse_client` | `tools/clickhouse/` | `{ "host": …, "username": …, "password": …, "query": … }` | Runs one SQL statement against a ClickHouse store over its HTTP interface and returns a `SELECT` as CSV (`default_format=CSVWithNames`). |
-| `s3_client` | `tools/s3/` | `{ "bucket": …, "region": …, "endpoint": …, "access_key": …, "secret_key": …, "operation": …, "key": …, "filename": … }` | Manages files in an S3-compatible store (SigV4 via [`rusty-s3`](https://docs.rs/rusty-s3)). `operation` ∈ `list` / `create` (upload `/sandbox/<filename>` to `key`) / `delete` / `download` (save `key` to `/sandbox/<filename>`). |
+| `s3_client` | `tools/s3/` | `{ "bucket": …, "region": …, "endpoint": …, "access_key": …, "secret_key": …, "operation": …, "key": …, "path": … }` | Manages files in an S3-compatible store (SigV4 via [`rusty-s3`](https://docs.rs/rusty-s3)). `operation` ∈ `list` / `create` (upload the sandbox file at absolute `path` to `key`) / `delete` / `download` (save `key` to absolute `path`). |
 
 > The `python` tool runs **builtins-only**: the full language is available, but
 > there is no importable standard library (`import json`, `import math`, … raise
@@ -328,9 +335,10 @@ toolchain can emit a component works. The recipe is always the same:
 
 1. Generate bindings from `tools/tool.wit` for the world `tool-world`.
 2. Implement the two exports:
-   - `info()` → `{ name, description, schema }`, where `schema` is a **JSON
-     Schema string** describing the params (the model reads `description` +
-     `schema` to learn when and how to call the tool),
+   - `info()` → `{ name, description, schema, permissions }`, where `schema` is a
+     **JSON Schema string** describing the params (the model reads `description` +
+     `schema` to learn when and how to call the tool) and `permissions` lists the
+     capabilities (`network`, `file-system`) the sandbox must grant,
    - `run(input)` → `{ state, content }`, where `input` is a JSON string of the
      params and `state` is `done` or `error`.
 3. Build a component targeting `wasm32-wasip2`.
@@ -381,7 +389,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 
 **3. Implement it** (`tools/your-tool/src/lib.rs`). Define your params (with a
 doc comment per field — it becomes the schema description the model sees), a
-`run` function, and hand both to `define_tool!`:
+`run` function, and hand them to `define_tool!` along with the capabilities the
+tool needs (`vec![]` for none):
 
 ```rust
 use schemars::JsonSchema;
@@ -406,13 +415,15 @@ define_tool!(
   HelloTool,                                     // name is snake_cased -> "hello_tool"
   HelloParams,
   "A simple hello-world tool returning hello + a string received as argument",
+  vec![],                                        // capabilities, e.g. vec![Permission::Network, Permission::FileSystem]
   run
 );
 ```
 
-`ToolOutput`, `ToolOutputState` and the `Guest`/`export!` glue all come from the
-macro. The tool's registered `name` is the struct name in snake_case. It builds
-automatically with `make develop`.
+`ToolOutput`, `ToolOutputState`, `Permission` and the `Guest`/`export!` glue all
+come from the macro. The tool's registered `name` is the struct name in
+snake_case, and the `vec![…]` of `Permission`s becomes the `permissions` the
+harness grants its sandbox. It builds automatically with `make develop`.
 
 ### JavaScript / TypeScript
 
@@ -436,6 +447,7 @@ export function info() {
       properties: { suffix: { type: "string", description: "The value to greet." } },
       required: ["suffix"],
     }),
+    permissions: [],   // e.g. ["network", "file-system"]
   };
 }
 
@@ -474,6 +486,7 @@ class ToolWorld(exports.ToolWorld):
                 "properties": {"suffix": {"type": "string"}},
                 "required": ["suffix"],
             }),
+            permissions=[],   # e.g. [exports.Permission.NETWORK, exports.Permission.FILE_SYSTEM]
         )
 
     def run(self, input: str):
@@ -513,6 +526,7 @@ func init() {
             Name:        "my_tool",
             Description: "What it does and when to use it",
             Schema:      `{"type":"object","properties":{"suffix":{"type":"string"}},"required":["suffix"]}`,
+            Permissions: nil, // e.g. []tool.Permission{tool.PermissionNetwork, tool.PermissionFileSystem}
         }
     }
     tool.Exports.Run = func(input string) tool.ToolOutput {
@@ -552,30 +566,34 @@ implement `info`/`run`, build, and drop the `.wasm` in `data/tools/`.
 
 ### Capabilities & the sandbox
 
-Tools run with **no ambient authority** — they hold only what the harness hands
-their WASI context in `ToolState::new()`:
+Tools run with **no ambient authority**. Each grant is opted into by the tool's
+declared `permissions` (see [WIT as the tool contract](#wit-as-the-tool-contract)):
+`ToolState::new()` reads that list and hands the WASI context only what it names.
+
+Granted to **every** tool:
 
 - **stdout / stderr** — inherited, so a tool's logging surfaces in the harness logs.
 - **Selected env vars** — every host variable named `OLIVIA_TOOL_<NAME>` is
   forwarded to the tool as `<NAME>` (prefix stripped). Nothing else from the host
   environment is visible.
-- **Outbound HTTP** — `wasmtime-wasi-http` is linked in, so tools can make HTTP
-  requests (used by `web_search`, `web`, `download`, `clickhouse_client`,
-  `s3_client`).
-- **Outbound TCP + DNS** — `inherit_network()` grants raw sockets and name
-  resolution (used by `postgres_client` to speak the wire protocol).
-- **The `/sandbox` directory** — preopened read/write; the only writable path.
-  Tools use it to persist files and exchange data (e.g. `download` writes a file,
-  `python` reads it, `s3_client` uploads it).
 
-Still **denied**: any other filesystem path, inbound sockets, process args, and
-host env vars without the `OLIVIA_TOOL_` prefix. Each invocation gets a fresh
-store, so no state leaks between calls.
+Granted **only when declared**:
 
-> [!WARNING]
-> Network access and the `/sandbox` preopen are currently granted to **all**
-> tools, not opted in per tool. Treat each grant as widening the trust boundary;
-> tighten it per tool in `ToolState::new()` if you need finer control.
+- **`network`** → `inherit_network()` + name resolution: raw outbound TCP and
+  DNS, plus the linked-in `wasmtime-wasi-http` for HTTP. Declared by the
+  networked tools (`web_search`, `web`, `http`, `download`, `postgres_client`,
+  `clickhouse_client`, `s3_client`).
+- **`file-system`** → a per-session `/sandbox` directory, preopened read/write;
+  the only writable path. Declared by `fs`, `python`, `download` and `s3_client`,
+  which use it to persist files and exchange data across steps (e.g. `download`
+  writes a file, `python` reads it, `s3_client` uploads it). On the host each
+  session lives under a private subdirectory (`<sandbox>/<session_id>`) but every
+  tool sees it as `/sandbox`.
+
+Always **denied**: any capability a tool did not declare, any other filesystem
+path, inbound sockets, process args, and host env vars without the
+`OLIVIA_TOOL_` prefix. Each invocation gets a fresh store, so no state leaks
+between calls.
 
 ## Security model
 
