@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OlivIA — a safe, sandboxed harness for LLM agents</title>
+  <meta name="description" content="OlivIA is a general-purpose harness that runs an LLM as a safe, sandboxed task coordinator: the model only routes requests, and every tool runs as an isolated WebAssembly component.">
+  <meta name="color-scheme" content="light">
+
+  <meta property="og:title" content="OlivIA">
+  <meta property="og:description" content="A general-purpose harness that runs an LLM as a safe, sandboxed task coordinator.">
+  <meta property="og:type" content="website">
+
+  <link rel="icon" href="assets/cat.gif">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" id="top">
+    <div class="wrap header-inner">
+      <a class="brand" href="#top" aria-label="OlivIA — home">
+        <span class="brand-name">OlivIA</span>
+      </a>
+
+      <nav class="site-nav" aria-label="Primary">
+        <ul>
+          <li><a href="#architecture">Architecture</a></li>
+          <li><a href="#security">Security</a></li>
+          <li><a href="#tools">Tools</a></li>
+          <li><a href="#start">Get started</a></li>
+        </ul>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="https://github.com/helloIAmPau/olivia" target="_blank" rel="noopener">
+          <svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+          <span>GitHub</span>
+        </a>
+        <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav-mobile">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+
+    <nav class="site-nav-mobile" id="site-nav-mobile" aria-label="Primary mobile" hidden>
+      <ul>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#tools">Tools</a></li>
+        <li><a href="#start">Get started</a></li>
+        <li><a href="https://github.com/helloIAmPau/olivia" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+
+    <!-- ───────────────────────── Hero ───────────────────────── -->
+    <section class="hero" id="home">
+      <div class="wrap hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">General-purpose LLM harness</p>
+          <h1 class="hero-title"><span class="grad hero-name">OlivIA</span></h1>
+          <h2 class="hero-motto">my <span class="censored" aria-label="[censored]">shit</span><br>in my sandbox</h2>
+          <p class="hero-tagline">Purr-mission denied</p>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="hero-logo-frame">
+            <img src="assets/cat.gif" alt="" class="hero-logo" width="220" height="220">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── The Aim ───────────────────────── -->
+    <section class="section" id="aim">
+      <div class="wrap">
+        <h2 class="section-title">A <span class="accent">general-purpose</span> harness you can trust <em>more</em></h2>
+        <p class="section-lede">
+          OlivIA is built to be the reusable substrate under <em>any</em> agentic
+          workload. You describe an agent and the services that invoke it in one
+          TOML file; the harness exposes the matching endpoints and routes every
+          request through the same sandboxed loop. Swap the prompt, the tools, and
+          the data stores, and the same runtime becomes a support bot, an ETL
+          scheduler, a research assistant, or an internal automation — with the
+          identical safety guarantees.
+        </p>
+        <p class="section-lede">
+          That trust is structural, not hoped-for. OlivIA's architecture narrows
+          what the model can do — and where unexpected behaviour can go — in three
+          ways: it <strong>enforces the communication layer with strongly typed
+          messages</strong>, so the model can only emit a validated envelope rather
+          than free-form actions; it <strong>denies the model full control</strong>,
+          keeping it a router that delegates instead of an operator that executes;
+          and it <strong>sandboxes every tool inside a WebAssembly sandbox</strong>,
+          so tool code runs with only the capabilities it was explicitly granted.
+        </p>
+
+        <div class="pillars">
+          <article class="pillar">
+            <div class="pillar-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h10"/></svg>
+            </div>
+            <h3>Two ideas, enforced</h3>
+            <p>The model is a <strong>router, not a solver</strong>, and tools are <strong>untrusted code, so they run sandboxed</strong>. Everything else follows from these.</p>
+          </article>
+          <article class="pillar">
+            <div class="pillar-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 3l8 4v5c0 4.4-3.1 7.6-8 9-4.9-1.4-8-4.6-8-9V7z"/></svg>
+            </div>
+            <h3>Bounded blast radius</h3>
+            <p>The worst a jailbroken model can do is "call tool&nbsp;X"; the worst a buggy tool can do is limited to the handful of capabilities it declared.</p>
+          </article>
+          <article class="pillar">
+            <div class="pillar-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v10H4zM8 19h8M12 15v4"/></svg>
+            </div>
+            <h3>Language-agnostic tools</h3>
+            <p>A tool is any <code>wasm32-wasip2</code> component implementing one WIT contract — write it in Rust, JS, Python, Go, or C.</p>
+          </article>
+          <article class="pillar">
+            <div class="pillar-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8"/></svg>
+            </div>
+            <h3>One config, many surfaces</h3>
+            <p>HTTP endpoints, a Telegram bot, and cron triggers all invoke the same agent — declared in a single file.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Architecture ───────────────────────── -->
+    <section class="section section-alt" id="architecture">
+      <div class="wrap">
+        <p class="kicker">Architecture</p>
+        <h2 class="section-title">A request enters, the agent routes, a tool runs sandboxed.</h2>
+        <p class="section-lede">
+          A trigger arrives through a <strong>service</strong>, is handled by the
+          <strong>agent</strong>, and the agent runs an agentic loop: ask the model
+          what to do, run the chosen tool in a fresh sandbox, feed the result back,
+          repeat — until the model answers <code>done</code> or <code>error</code>.
+        </p>
+
+        <!-- Flow diagram -->
+        <div class="diagram" role="img" aria-label="Data flow: a service receives a trigger and calls the agent; the agent consults the model through the LiteLLM proxy and, on a tool decision, runs a tool in a WASM and WASI sandbox that reaches external services and the shared sandbox directory.">
+          <div class="diagram-col">
+            <div class="node node-in">
+              <span class="node-title">Services</span>
+              <span class="node-sub">HTTP · Telegram · cron</span>
+            </div>
+          </div>
+          <div class="arrow" aria-hidden="true"><span>trigger</span></div>
+          <div class="diagram-col">
+            <div class="node node-agent">
+              <span class="node-title">Agent</span>
+              <span class="node-sub">router / loop</span>
+            </div>
+            <div class="node-link" aria-hidden="true">
+              <div class="arrow arrow-up"><span>ask</span></div>
+              <div class="node node-llm">
+                <span class="node-title">LiteLLM</span>
+                <span class="node-sub">Ollama · Anthropic · OpenAI</span>
+              </div>
+            </div>
+          </div>
+          <div class="arrow" aria-hidden="true"><span>tool</span></div>
+          <div class="diagram-col">
+            <div class="node node-sandbox">
+              <span class="node-title">WASM + WASI sandbox</span>
+              <span class="node-sub">tool registry → run</span>
+            </div>
+          </div>
+          <div class="arrow" aria-hidden="true"><span>grants</span></div>
+          <div class="diagram-col">
+            <div class="node node-out">
+              <span class="node-title">Resources</span>
+              <span class="node-sub">SearXNG · Browserless · Postgres · ClickHouse · S3 · /sandbox</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent loop -->
+        <div class="split">
+          <div class="split-text">
+            <h3>The agentic loop</h3>
+            <p>
+              The model never <em>does</em> the work. Wrapped in a strict developer
+              prompt (the tool catalogue, the data stores, the rules), it replies
+              with a small JSON envelope — nothing else.
+            </p>
+            <ol class="loop-steps">
+              <li><span class="step-n">1</span><div><strong>Plan.</strong> The harness sends the running conversation to the model via LiteLLM.</div></li>
+              <li><span class="step-n">2</span><div><strong>Act.</strong> The model returns <code>{"state":"tool", …}</code>; the harness runs it in a fresh sandbox.</div></li>
+              <li><span class="step-n">3</span><div><strong>Observe.</strong> The tool's output is appended to the conversation and the loop repeats.</div></li>
+              <li><span class="step-n">✓</span><div><strong>Finish.</strong> On <code>done</code>/<code>error</code> the agent replies to the caller. Bounded by <code>MAX_ITERATIONS</code>.</div></li>
+            </ol>
+          </div>
+          <div class="split-aside">
+            <div class="card code-card">
+              <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">model → harness</span></div>
+<pre><code>{
+  <span class="k">"state"</span>: <span class="s">"tool"</span>,
+  <span class="k">"name"</span>: <span class="s">"web_search"</span>,
+  <span class="k">"params"</span>: <span class="s">"{\"query\":\"…\"}"</span>
+}
+
+<span class="c">// or, when finished</span>
+{ <span class="k">"state"</span>: <span class="s">"done"</span>, <span class="k">"result"</span>: <span class="s">"…"</span> }</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- WIT contract -->
+        <div class="split reverse">
+          <div class="split-text">
+            <h3>One contract: the WIT world</h3>
+            <p>
+              The host/guest boundary is described once as a
+              <a href="https://component-model.bytecodealliance.org/design/wit.html" target="_blank" rel="noopener">WIT</a>
+              world. Both the harness and every tool generate bindings from it, so
+              the ABI is checked at compile time. A tool exports two functions:
+            </p>
+            <ul class="ticks">
+              <li><code>info()</code> — its <code>name</code>, <code>description</code>, params <code>schema</code>, and the <strong>permissions</strong> it needs.</li>
+              <li><code>run(input)</code> — receives JSON params, returns <code>{ state, content }</code>.</li>
+            </ul>
+            <p class="muted-note">Each call gets a fresh, sandboxed instance — tools accumulate no state between invocations.</p>
+          </div>
+          <div class="split-aside">
+            <div class="card code-card">
+              <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">tools/tool.wit</span></div>
+<pre><code><span class="c">world</span> tool-world {
+  <span class="c">enum</span> permission { network, file-system }
+
+  <span class="c">record</span> tool-info {
+    name: string,
+    description: string,
+    schema: string,
+    permissions: <span class="c">list</span>&lt;permission&gt;
+  }
+
+  <span class="c">export</span> info: <span class="c">func</span>() -&gt; tool-info;
+  <span class="c">export</span> run: <span class="c">func</span>(input: string) -&gt; tool-output;
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Security ───────────────────────── -->
+    <section class="section" id="security">
+      <div class="wrap">
+        <p class="kicker">Security model</p>
+        <h2 class="section-title">Defense in depth for code you can't trust.</h2>
+        <p class="section-lede">
+          The threat model is blunt: <strong>an LLM can't be trusted to be correct,
+          and it can't be trusted with arbitrary execution.</strong> OlivIA contains
+          both with two independent layers — so even a fully jailbroken model driving
+          a buggy tool is bounded to a small, enumerated capability set.
+        </p>
+
+        <div class="layers">
+          <article class="layer">
+            <div class="layer-num">01</div>
+            <div>
+              <h3>The model has no execution surface</h3>
+              <p>
+                The developer prompt makes it a strict router: zero internal logic,
+                always delegate, emit <em>only</em> the JSON envelope. The one thing
+                it can cause is "call tool <code>X</code> with params <code>Y</code>" —
+                and the harness validates the tool name against the registry, so it
+                can't invent a tool that isn't there.
+              </p>
+            </div>
+          </article>
+          <article class="layer">
+            <div class="layer-num">02</div>
+            <div>
+              <h3>Tools are sandboxed WebAssembly, deny-by-default</h3>
+              <p>
+                Every tool is a memory-isolated <code>wasm32-wasip2</code> component
+                run under a capability-based WASI sandbox that grants <em>nothing</em>
+                by default. A tool holds only the capabilities it declared in
+                <code>info()</code> — there is no path from a clever prompt to
+                arbitrary code on the host.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <h3 class="subhead">The permission model</h3>
+        <p class="section-lede narrow">
+          <code>ToolState::new()</code> reads a tool's declared permissions and hands
+          its sandbox only what they name. Two things are given to every tool; the
+          dangerous capabilities are strictly opt-in; everything else is denied.
+        </p>
+
+        <div class="perm-grid">
+          <div class="perm-col perm-always">
+            <div class="perm-head">Granted to every tool</div>
+            <ul>
+              <li><strong>stdout / stderr</strong> — logging surfaces in harness logs</li>
+              <li><strong><code>OLIVIA_TOOL_*</code> env</strong> — only prefixed vars, prefix stripped</li>
+            </ul>
+          </div>
+          <div class="perm-col perm-optin">
+            <div class="perm-head">Opt-in, only when declared</div>
+            <ul>
+              <li><span class="badge badge-net">network</span> raw outbound TCP + DNS, plus WASI HTTP</li>
+              <li><span class="badge badge-fs">file-system</span> a private per-session <code>/sandbox</code>, read/write</li>
+            </ul>
+          </div>
+          <div class="perm-col perm-deny">
+            <div class="perm-head">Always denied</div>
+            <ul>
+              <li>Any capability not declared</li>
+              <li>Any other filesystem path</li>
+              <li>Inbound sockets, process args, un-prefixed env</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="split-text">
+            <h3>Per-session sandbox isolation</h3>
+            <p>
+              A <code>file-system</code> tool sees a single writable directory,
+              <code>/sandbox</code>. On the host each session lives under its own
+              private subdirectory (<code>&lt;sandbox&gt;/&lt;session_id&gt;</code>),
+              mounted into the guest as <code>/sandbox</code> — so one run can never
+              read another's files, and the mount is the <em>only</em> thing that
+              confines writes.
+            </p>
+            <h3>Stateless by construction</h3>
+            <p>
+              Every invocation gets a fresh <code>Store</code>. No memory, no
+              filesystem handles, and no capabilities leak from one tool call to the
+              next.
+            </p>
+          </div>
+          <div class="split-aside">
+            <div class="card fact-card">
+              <div class="fact"><span class="fact-k">Isolation</span><span class="fact-v">memory-safe wasm component per call</span></div>
+              <div class="fact"><span class="fact-k">Default authority</span><span class="fact-v">none</span></div>
+              <div class="fact"><span class="fact-k">Network</span><span class="fact-v">opt-in per tool</span></div>
+              <div class="fact"><span class="fact-k">Filesystem</span><span class="fact-v">opt-in, per-session <code>/sandbox</code></span></div>
+              <div class="fact"><span class="fact-k">Model output</span><span class="fact-v">validated JSON envelope only</span></div>
+              <div class="fact"><span class="fact-k">Sessions</span><span class="fact-v">in-memory, keyed by UUID</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Tools ───────────────────────── -->
+    <section class="section section-alt" id="tools">
+      <div class="wrap">
+        <p class="kicker">Bundled tools</p>
+        <h2 class="section-title">The capabilities the agent can reach for.</h2>
+        <p class="section-lede">
+          Each ships as its own wasm component and declares exactly the permissions
+          it needs. Add your own by dropping a <code>.wasm</code> into the tools
+          folder — no harness rebuild.
+        </p>
+
+        <div class="tool-grid">
+          <article class="tool"><h3>hello_tool</h3><p>Reference implementation — returns <code>Hello &lt;suffix&gt;</code>.</p><div class="perms"><span class="badge badge-none">no capabilities</span></div></article>
+          <article class="tool"><h3>python</h3><p>Runs a Python 3 script in an embedded RustPython interpreter (builtins-only).</p><div class="perms"><span class="badge badge-fs">file-system</span></div></article>
+          <article class="tool"><h3>http</h3><p>Direct HTTP request to any URL; returns status line + body.</p><div class="perms"><span class="badge badge-net">network</span></div></article>
+          <article class="tool"><h3>web_search</h3><p>Web search via a SearXNG instance; returns the top results.</p><div class="perms"><span class="badge badge-net">network</span></div></article>
+          <article class="tool"><h3>web</h3><p>Drives a headless browser through Browserless — scrape, browse, screenshot.</p><div class="perms"><span class="badge badge-net">network</span></div></article>
+          <article class="tool"><h3>download</h3><p>Captures a browser download and writes it to the sandbox.</p><div class="perms"><span class="badge badge-net">network</span><span class="badge badge-fs">file-system</span></div></article>
+          <article class="tool"><h3>fs</h3><p>List, create and delete files and directories inside <code>/sandbox</code>.</p><div class="perms"><span class="badge badge-fs">file-system</span></div></article>
+          <article class="tool"><h3>postgres_client</h3><p>Runs one SQL statement against PostgreSQL; returns CSV.</p><div class="perms"><span class="badge badge-net">network</span></div></article>
+          <article class="tool"><h3>clickhouse_client</h3><p>Runs one SQL statement against ClickHouse over HTTP; returns CSV.</p><div class="perms"><span class="badge badge-net">network</span></div></article>
+          <article class="tool"><h3>s3_client</h3><p>List / upload / download / delete objects in an S3-compatible store.</p><div class="perms"><span class="badge badge-net">network</span><span class="badge badge-fs">file-system</span></div></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Get started ───────────────────────── -->
+    <section class="section" id="start">
+      <div class="wrap">
+        <p class="kicker">Get started</p>
+        <h2 class="section-title">Describe an agent. Point services at it. Run.</h2>
+
+        <div class="split">
+          <div class="split-text">
+            <h3>Run the stack</h3>
+            <p>The dev stack brings up the harness alongside a LiteLLM proxy, a local Ollama, the tools builder, and the backing services tools reach.</p>
+            <div class="card code-card compact">
+              <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">shell</span></div>
+<pre><code><span class="c"># build & run everything (sources .env.develop)</span>
+make develop
+
+<span class="c"># pull the model referenced by the LiteLLM config, once</span>
+docker compose <span class="k">exec</span> ollama ollama pull gemma4:12b</code></pre>
+            </div>
+
+            <h3>Command-line options</h3>
+            <table class="opt-table">
+              <thead><tr><th>Option</th><th>Default</th><th>Purpose</th></tr></thead>
+              <tbody>
+                <tr><td><code>--config</code></td><td><code>/config.toml</code></td><td>The TOML config to load</td></tr>
+                <tr><td><code>--tools</code></td><td><code>/tools</code></td><td>Folder scanned for <code>*.wasm</code> tools</td></tr>
+                <tr><td><code>--sandbox</code></td><td><code>/sandbox</code></td><td>Host base dir for per-session sandboxes</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="split-aside">
+            <div class="card code-card">
+              <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">config.toml</span></div>
+<pre><code><span class="c">[agent]</span>
+model = <span class="s">"anthropic/claude-haiku-4-5"</span>
+prompt = <span class="s">"Help with simple tasks."</span>
+
+<span class="c"># a data store the agent can reach via a tool</span>
+<span class="c">[agent.stores.default]</span>
+type = <span class="s">"postgres"</span>
+connection_string = <span class="s">"postgres://…"</span>
+prompt = <span class="s">"Default relational store."</span>
+
+<span class="c"># an HTTP endpoint that invokes the agent</span>
+<span class="c">[services.api]</span>
+type = <span class="s">"http"</span>
+
+<span class="c">[services.api.endpoints.ask]</span>
+method = <span class="s">"post"</span>
+path = <span class="s">"/ask"</span>
+prompt = <span class="s">"Answer the user's request."</span></code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap footer-inner">
+      <div class="footer-brand">
+        <img src="assets/cat.gif" alt="" width="28" height="28" aria-hidden="true">
+        <span>OlivIA</span>
+      </div>
+      <p class="footer-meta">
+        Released under the <a href="https://github.com/helloIAmPau/olivia/blob/master/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        · © 2026 Pasquale Boemio
+      </p>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="#architecture">Architecture</a>
+        <a href="#security">Security</a>
+        <a href="#tools">Tools</a>
+        <a href="https://github.com/helloIAmPau/olivia" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="main.js" defer></script>
+</body>
+</html>
