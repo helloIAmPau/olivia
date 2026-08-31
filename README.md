@@ -52,13 +52,32 @@ capabilities it was granted. See [Security model](#security-model).
 ## Architecture
 
 ```
-                              tool registry ─► pick + run in a wasm + WASI sandbox ─► SearXNG · Browserless · Postgres · ClickHouse · S3 · /sandbox
-                                 ▲   │
-  HTTP request ─┐                │   ▼
-  Telegram msg ─┼─► service ─►  agent (router) ─► done / error
-  cron tick    ─┘                │   ▲
-                                 ▼   │
-                              LiteLLM ─► Ollama / Anthropic / OpenAI
+  HTTP request ─┐
+  Telegram msg ─┼─► service ─► agent ─► done / error ─► reply to caller
+  cron tick    ─┘               ▲ │
+                                │ ▼
+  ┌── agentic loop (repeats think → act until done/error, ≤ MAX_ITERATIONS = 200) ──────
+  │
+  │   ① send a FIXED-SIZE context ─────────► LiteLLM ──► Ollama / Anthropic / OpenAI
+  │        · system: tool catalogue + data stores + rules    │
+  │        · the original request                            │
+  │        · latest state — ONE rolling message              ▼
+  │                       ▲                       ② model returns ONE JSON envelope
+  │                       │                          { thought, state, … }
+  │                       │                       ┌────────────┴─────────────┐
+  │                       │                  state="tool"          state="done"|"error"
+  │                       │                  { name, params }       { result | error_message }
+  │                       │                       │                         │
+  │                       │                       ▼                         ▼
+  │                       │           ③ tool registry ─► run in         leave the loop; the
+  │                       │              a wasm + WASI sandbox           agent returns to the
+  │                       │              (SearXNG · Browserless ·        service → reply
+  │                       │               Postgres · ClickHouse ·
+  │                       │               S3 · /sandbox)
+  │                       │                       │
+  │        ④ REPLACE the rolling message with the │
+  │           model's envelope + this tool result ◄┘
+  └────────────────────────────────────────────────────────────────────────────────────
 ```
 
 A request enters through a **service**, is handled by the **agent**, and the
@@ -66,19 +85,39 @@ agent runs an *agentic loop*:
 
 1. **A service receives a trigger** — an HTTP request, a Telegram message, or a
    cron tick — and calls the agent with the incoming text.
-2. **The agent asks the model what to do.** It wraps the request in a strict
-   developer prompt (the tool catalogue, the available data stores, the rules)
-   and sends the running conversation to the model through the **LiteLLM** proxy,
-   which fronts Ollama, Anthropic and OpenAI.
-3. **The model replies with a JSON envelope** — nothing else. It is one of:
+2. **The agent asks the model what to do.** It assembles a **fixed-size context**
+   — the developer prompt (the tool catalogue, the available data stores, the
+   rules), the original request, and a single rolling *latest state* message — and
+   sends it to the model through the **LiteLLM** proxy, which fronts Ollama,
+   Anthropic and OpenAI.
+3. **The model replies with a JSON envelope** — nothing else. Every envelope
+   carries a **`thought`** (the model's running memory, see below) and a `state`,
+   one of:
    - `{"state":"tool", "name":…, "params":…}` — call a tool,
    - `{"state":"done", "result":…}` — finished, here is the answer,
-   - `{"state":"error", "message":…}` — give up with a reason.
+   - `{"state":"error", "error_message":…}` — give up with a reason.
 4. **On `tool`**, the harness looks the tool up in the **registry**, runs it in a
-   fresh **wasm + WASI sandbox**, appends the tool's output to the conversation,
-   and loops back to step 2.
+   fresh **wasm + WASI sandbox**, and *replaces* the rolling *latest state* message
+   with the model's envelope plus the tool's output — the context stays the same
+   size — then loops back to step 2.
 5. **On `done`/`error`**, the agent returns to the service, which replies to the
    caller. The loop is bounded by `MAX_ITERATIONS` (200).
+
+**The context never grows.** History is deliberately not preserved between
+iterations: each turn re-sends the same three slots and step 4 overwrites the last
+one. The model's only memory is the envelope's **`thought`** object — a compact
+JSON-encoded status it rewrites and copies forward itself every turn:
+
+| Field | Meaning |
+| ----- | ------- |
+| `goal`  | The user's objective, restated once in ≤ 20 words and then copied forward **verbatim** — never re-derived or reworded. |
+| `plan`  | The full step list (≤ 8 entries), each `"<n>. <imperative>"`. Written on the first iteration and carried forward unchanged; on a replan only the not-yet-done tail is rewritten and indices are never reused. |
+| `done`  | Append-only log of finished steps, each `"<n>:<ok\|fail> <outcome>"` — outcomes, not narrative, and never a copy of the tool output. |
+| `facts` | Durable key→value data later steps need (file paths, IDs, counts, URLs, schema names). Terse keys, dropped once unused. **Never** credentials or file contents. |
+| `cur`   | The step running **now**, `"<n> <action>"`, with a short justification only when the choice is non-obvious. |
+
+A fresh model instance handed only the last `thought` plus the newest tool result
+has everything it needs to continue — which is exactly what each iteration is.
 
 Supporting pieces:
 
@@ -109,7 +148,8 @@ world tool-world {
     name: string,
     description: string,
     schema: string,               // JSON Schema for this tool's params
-    permissions: list<permission> // capabilities the sandbox must grant
+    permissions: list<permission>,// capabilities the sandbox must grant
+    env: list<string>             // host env vars to forward into the sandbox
   }
 
   enum tool-output-state { done, error }
@@ -125,11 +165,12 @@ world tool-world {
 ```
 
 - **`info()`** is called once at load time and returns the tool's `name`,
-  human-readable `description`, a JSON Schema for its parameters, and the list of
-  `permissions` (capabilities) it needs. The harness uses this to build its
-  registry, to tell the model which tools exist and how to call them, and to
-  decide which capabilities to grant the tool's sandbox — a tool receives nothing
-  it did not declare here.
+  human-readable `description`, a JSON Schema for its parameters, the list of
+  `permissions` (capabilities) it needs, and the list of `env` variables it wants
+  forwarded from the host. The harness uses this to build its registry, to tell
+  the model which tools exist and how to call them, and to decide which
+  capabilities and environment variables to grant the tool's sandbox — a tool
+  receives nothing it did not declare here.
 - **`run(input)`** is called when the model routes a request to this tool. It
   receives a JSON string of parameters (matching the schema) and returns a
   `tool-output` whose `state` reports success or failure and whose `content`
@@ -391,7 +432,8 @@ serde = { version = "1.0.229", features = ["derive"] }
 **3. Implement it** (`tools/your-tool/src/lib.rs`). Define your params (with a
 doc comment per field — it becomes the schema description the model sees), a
 `run` function, and hand them to `define_tool!` along with the capabilities the
-tool needs (`vec![]` for none):
+tool needs (`vec![]` for none) and the host env vars to forward into its sandbox
+(`vec![]` for none):
 
 ```rust
 use schemars::JsonSchema;
@@ -417,14 +459,16 @@ define_tool!(
   HelloParams,
   "A simple hello-world tool returning hello + a string received as argument",
   vec![],                                        // capabilities, e.g. vec![Permission::Network, Permission::FileSystem]
+  vec![],                                        // env vars to forward, e.g. vec!["BROWSERLESS_TOKEN".to_string()]
   run
 );
 ```
 
 `ToolOutput`, `ToolOutputState`, `Permission` and the `Guest`/`export!` glue all
 come from the macro. The tool's registered `name` is the struct name in
-snake_case, and the `vec![…]` of `Permission`s becomes the `permissions` the
-harness grants its sandbox. It builds automatically with `make develop`.
+snake_case, the `vec![…]` of `Permission`s becomes the `permissions` the harness
+grants its sandbox, and the `vec![…]` of names becomes the `env` variables it
+forwards. It builds automatically with `make develop`.
 
 ### JavaScript / TypeScript
 
@@ -449,6 +493,7 @@ export function info() {
       required: ["suffix"],
     }),
     permissions: [],   // e.g. ["network", "file-system"]
+    env: [],           // e.g. ["BROWSERLESS_TOKEN"]
   };
 }
 
@@ -488,6 +533,7 @@ class ToolWorld(exports.ToolWorld):
                 "required": ["suffix"],
             }),
             permissions=[],   # e.g. [exports.Permission.NETWORK, exports.Permission.FILE_SYSTEM]
+            env=[],           # e.g. ["BROWSERLESS_TOKEN"]
         )
 
     def run(self, input: str):
@@ -528,6 +574,7 @@ func init() {
             Description: "What it does and when to use it",
             Schema:      `{"type":"object","properties":{"suffix":{"type":"string"}},"required":["suffix"]}`,
             Permissions: nil, // e.g. []tool.Permission{tool.PermissionNetwork, tool.PermissionFileSystem}
+            Env:         nil, // e.g. []string{"BROWSERLESS_TOKEN"}
         }
     }
     tool.Exports.Run = func(input string) tool.ToolOutput {
@@ -574,9 +621,6 @@ declared `permissions` (see [WIT as the tool contract](#wit-as-the-tool-contract
 Granted to **every** tool:
 
 - **stdout / stderr** — inherited, so a tool's logging surfaces in the harness logs.
-- **Selected env vars** — every host variable named `OLIVIA_TOOL_<NAME>` is
-  forwarded to the tool as `<NAME>` (prefix stripped). Nothing else from the host
-  environment is visible.
 
 Granted **only when declared**:
 
@@ -590,11 +634,15 @@ Granted **only when declared**:
   writes a file, `python` reads it, `s3_client` uploads it). On the host each
   session lives under a private subdirectory (`<sandbox>/<session_id>`) but every
   tool sees it as `/sandbox`.
+- **Named env vars** — each name a tool lists in its `info().env` is looked up in
+  the harness's own environment and, if set, forwarded into the sandbox under the
+  same name. A tool sees only the variables it named (e.g. `web` and `download`
+  request `BROWSERLESS_TOKEN`); nothing else from the host environment is visible.
 
 Always **denied**: any capability a tool did not declare, any other filesystem
-path, inbound sockets, process args, and host env vars without the
-`OLIVIA_TOOL_` prefix. Each invocation gets a fresh store, so no state leaks
-between calls.
+path, inbound sockets, process args, and any host env var the tool did not name
+in its `env` list. Each invocation gets a fresh store, so no state leaks between
+calls.
 
 ## Security model
 
@@ -658,13 +706,14 @@ languages are dropped into `data/tools/` directly.
 | `OLIVIA_ANTHROPIC_KEY` | litellm | API key for the `anthropic/*` models. |
 | `OPENAI_API_KEY` | litellm | API key for the `openai/*` models. |
 | `SEARXNG_TOKEN` | searxng | `secret_key` for the SearXNG instance. |
-| `BROWSERLESS_TOKEN` | browserless | Auth token for Browserless (also forwarded to `web`/`download`). |
+| `BROWSERLESS_TOKEN` | browserless, harness → `web`/`download` | Auth token for Browserless; forwarded into the tools that declare it in `info().env`. |
 | `POSTGRES_*` / `CLICKHOUSE_*` / `RUSTFS_*` / `S3_BUCKET` | stores | Credentials for the bundled data stores. |
-| `OLIVIA_TOOL_<NAME>` | harness → tools | Any var with this prefix is forwarded into every tool as `<NAME>`. |
 
-Tools read plainly-named variables (`BROWSERLESS_HOST`, `BROWSERLESS_TOKEN`,
-`SEARXNG_HOST`, …); the harness exposes them by setting `OLIVIA_TOOL_<NAME>` on
-its own environment.
+A tool receives a host variable only if it names it in its `info().env` list (see
+[Capabilities & the sandbox](#capabilities--the-sandbox)). The harness looks each
+declared name up in its own environment and, when set, forwards it into the
+tool's sandbox under the same name — so set the plain variable (e.g.
+`BROWSERLESS_TOKEN`) on the harness and the requesting tool picks it up.
 
 > [!WARNING]
 > Do not commit real secrets. Keep them in a local, git-ignored env file and
