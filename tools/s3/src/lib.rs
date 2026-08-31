@@ -315,5 +315,6 @@ define_tool!(
   S3ClientParams,
   "Manages files in an S3-compatible object store (AWS S3, RustFS, MinIO, ...) over its HTTP API using presigned requests, exchanging file contents through the sandbox. Pass the exact bucket, region, endpoint, access_key and secret_key from the AVAILABLE DATA STORES section plus an operation: 'list' lists the objects in the bucket, 'create' uploads the sandbox file at absolute 'path' to object 'key', 'delete' removes object 'key', and 'download' saves object 'key' into the sandbox at absolute 'path'. Use it to persist, retrieve or manage documents, blobs and other files rather than structured relational data.",
   vec![Permission::Network, Permission::FileSystem],
+  vec![],
   run
 );

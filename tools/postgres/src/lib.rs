@@ -258,5 +258,6 @@ define_tool!(
   PostgresClientParams,
   "Executes a single SQL statement against a PostgreSQL data store and returns the result as CSV (a header row of column names followed by one row per record). Pass the exact connection_string from the AVAILABLE DATA STORES section plus the SQL to run. Use it to read from or write to a store (SELECT, INSERT, UPDATE, DELETE, CREATE TABLE, ...).",
   vec![Permission::Network],
+  vec![],
   run
 );

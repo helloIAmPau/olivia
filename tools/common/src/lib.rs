@@ -4,7 +4,7 @@ pub use paste::paste;
 
 #[macro_export]
 macro_rules! define_tool {
-  ($tool:ident, $params:ty, $description:expr, $permissions:expr, $execute:expr) => {
+  ($tool:ident, $params:ty, $description:expr, $permissions:expr, $env:expr, $execute:expr) => {
     ::wit_bindgen::generate!({
       world: "tool-world",
       path: "../tool.wit"
@@ -22,7 +22,8 @@ macro_rules! define_tool {
               name: "Invalid tool! Do not use it".to_string(),
               description: error.to_string(),
               schema: "Invalid tool! Do not use it".to_string(),
-              permissions: Vec::new()
+              permissions: Vec::new(),
+              env: Vec::new()
             };
           }
         };
@@ -31,7 +32,8 @@ macro_rules! define_tool {
           name: $crate::paste!(stringify!([< $tool:snake >])).to_string(),
           description: $description.to_string(),
           schema: schema_json,
-          permissions: $permissions
+          permissions: $permissions,
+          env: $env
         };
       }
 

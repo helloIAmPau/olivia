@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::env::vars;
+use std::env::var;
 use std::fs::create_dir_all;
 
 use uuid::Uuid;
 
 use tracing::info;
-use tracing::error;
 
 use wasmtime::Config;
 use wasmtime::Engine;
@@ -53,7 +52,7 @@ struct ToolState {
 }
 
 impl ToolState {
-  fn new(permissions: Vec<Permission>, session_id: &Uuid, sandbox: &str) -> Self {
+  fn new(permissions: Vec<Permission>, env: Vec<String>, sandbox_path: String) -> Result<Self, AgentError> {
     let mut builder = WasiCtx::builder();
     builder.inherit_stdout();
     builder.inherit_stderr();
@@ -65,44 +64,44 @@ impl ToolState {
           builder.allow_ip_name_lookup(true);
         }
         Permission::FileSystem => {
-          let session_sandbox = format!("{}/{}", sandbox, session_id);
-
-          match create_dir_all(&session_sandbox) {
+          match create_dir_all(&sandbox_path) {
             Ok(_) => {},
             Err(error) => {
-              error!("Unable to create the session sandbox directory {}: {}", session_sandbox, error);
+              let message = format!("Unable to create the session sandbox directory {}: {}", sandbox_path, error);
+              return Err(AgentError::Tool(message));
             }
           };
 
-          match builder.preopened_dir(&session_sandbox, GUEST_SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
+          match builder.preopened_dir(&sandbox_path, GUEST_SANDBOX_PATH, DirPerms::all(), FilePerms::all()) {
             Ok(_) => {},
             Err(error) => {
-              error!("Unable to preopen the sandbox directory {}: {}", session_sandbox, error);
+              let message = format!("Unable to preopen the sandbox directory {}: {}", sandbox_path, error);
+              return Err(AgentError::Tool(message));
             }
           };
         }
       }
     }
 
-    for (key, value) in vars() {
-      match key.strip_prefix("OLIVIA_TOOL_") {
-        Some(name) => {
-          info!("Loaded env variable {}={}", name, value);
+    for key in env {
+      match var(&key) {
+        Ok(value) => {
+          info!("Passing env variable {}={}", key, value);
 
-          builder.env(name, value);
-        }
+          builder.env(key, value);
+        },
         _ => {}
       }
     }
 
     let context = builder.build();
 
-    return Self {
+    return Ok(Self {
       context,
       http: WasiHttpCtx::new(),
       hooks: ToolHooks,
       table: ResourceTable::new()
-    };
+    });
   }
 }
 
@@ -133,9 +132,6 @@ pub struct ToolEngine {
 
 impl ToolEngine {
   pub async fn new(sandbox: &str) -> Result<Self, AgentError> {
-    // wasmtime-wasi-http performs outbound TLS with rustls, which refuses to pick
-    // a crypto backend on its own. Install one process-wide before any tool can
-    // make an HTTPS request. Err means a provider is already installed, fine.
     match rustls::crypto::ring::default_provider().install_default() {
       Ok(_) => {},
       Err(_) => {}
@@ -188,7 +184,7 @@ impl Tool {
       }
     };
 
-    let info = match Tool::bindings(vec![], &Uuid::nil(), engine.clone(), &component, async |bindings, store| {
+    let info = match Tool::bindings(vec![], vec![], &Uuid::nil(), engine.clone(), &component, async |bindings, store| {
       return bindings.call_info(store).await;
     }).await {
       Ok(info) => info,
@@ -205,7 +201,7 @@ impl Tool {
   }
 
   pub async fn run(&self, params: String, session_id: &Uuid) -> Result<ToolOutput, AgentError> {
-    let result = match Tool::bindings(self.info.permissions.clone(), session_id, self.engine.clone(), &self.component, async |bindings, store| {
+    let result = match Tool::bindings(self.info.permissions.clone(), self.info.env.clone(), session_id, self.engine.clone(), &self.component, async |bindings, store| {
       return bindings.call_run(store, &params).await;
     }).await {
       Ok(result) => result,
@@ -217,8 +213,15 @@ impl Tool {
     return Ok(result);
   }
 
-  async fn bindings<T>(permissions: Vec<Permission>, session_id: &Uuid, engine: Arc<ToolEngine>, component: &Component, call: impl AsyncFnOnce(ToolWorld, &mut Store<ToolState>) -> wasmtime::Result<T>) -> Result<T, AgentError> {
-    let state = ToolState::new(permissions, session_id, &engine.sandbox);
+  async fn bindings<T>(permissions: Vec<Permission>, env: Vec<String>, session_id: &Uuid, engine: Arc<ToolEngine>, component: &Component, call: impl AsyncFnOnce(ToolWorld, &mut Store<ToolState>) -> wasmtime::Result<T>) -> Result<T, AgentError> {
+    let sandbox_path = format!("{}/{}", engine.sandbox, session_id);
+    
+    let state = match ToolState::new(permissions, env, sandbox_path) {
+      Ok(state) => state,
+      Err(error) => {
+        return Err(error);
+      }
+    };
     let mut store = Store::new(&engine.wasm, state);
 
     let bindings = match ToolWorld::instantiate_async(&mut store, component, &engine.linker).await {

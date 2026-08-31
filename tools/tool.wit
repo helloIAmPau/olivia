@@ -10,7 +10,8 @@ world tool-world {
     name: string,
     description: string,
     schema: string,
-    permissions: list<permission>
+    permissions: list<permission>,
+    env: list<string>
   }
 
   enum tool-output-state {

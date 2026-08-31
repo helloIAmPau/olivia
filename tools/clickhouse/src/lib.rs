@@ -80,5 +80,6 @@ define_tool!(
   ClickhouseClientParams,
   "Executes a single SQL statement against a ClickHouse data store over its HTTP interface and returns the result of a SELECT as CSV (a header row of column names followed by one row per record). Pass the exact host, username and password from the AVAILABLE DATA STORES section plus the SQL to run. Use it to read from or write to a store (SELECT, INSERT, CREATE TABLE, ...). ClickHouse is column-oriented and optimised for large-scale analytical queries over immutable data; prefer it for aggregations and reporting rather than row-level updates or deletes.",
   vec![Permission::Network],
+  vec![],
   run
 );

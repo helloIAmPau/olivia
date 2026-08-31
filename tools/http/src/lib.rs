@@ -124,5 +124,6 @@ define_tool!(
   HttpParams,
   "Makes a direct HTTP request to any URL and returns the response. Provide a method (GET, POST, PUT, PATCH, DELETE or HEAD), an absolute URL, optional request headers as name/value pairs, and an optional request body sent verbatim (set your own Content-Type when sending JSON). The result is the response status line followed by its body decoded as text. Any status code (including 4xx/5xx) is returned as a normal result so you can react to it; only network-level failures are errors. Use it to call REST/JSON APIs, webhooks and other plain HTTP endpoints; for pages that need a real browser (JavaScript, scraping, screenshots) use the web tool instead.",
   vec![Permission::Network],
+  vec![],
   run
 );

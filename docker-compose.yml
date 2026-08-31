@@ -10,7 +10,7 @@ services:
     environment:
       - 'RUST_BACKTRACE=1'
       - 'LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}'
-      - 'OLIVIA_TOOL_BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN}'
+      - 'BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN}'
     configs:
       - source: 'test'
         target: '/config.toml'

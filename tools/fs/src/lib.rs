@@ -213,5 +213,6 @@ define_tool!(
   FsParams,
   "Manages files and directories inside the shared /sandbox working directory. Supports three operations selected via the `operation` field: \"list\" returns the entries (each prefixed with `dir ` or `file`) of the directory at `path`; \"create\" makes a new file or directory at `path` depending on `kind` (\"file\" or \"directory\"), optionally writing `content` into a file and creating any missing parent directories; \"delete\" removes the file or directory at `path` (directories are removed recursively). `path` is always an absolute path inside the sandbox, e.g. /sandbox/reports/2026.txt. Use it to inspect what other tools have written, to lay out folders, and to clean up files.",
   vec![Permission::FileSystem],
+  vec![],
   run
 );
