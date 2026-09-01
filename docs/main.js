@@ -93,13 +93,19 @@
 
   if (cat && scene) {
     var model = document.getElementById("platform-model");
-    var tools = document.getElementById("platform-tools");
     var request = scene.querySelector(".request");
+    var bubble = request.querySelector(".bubble");
+    var BUBBLE_Q = "assets/bubble-question.png";   // ??? — while the request is in flight
+    var BUBBLE_X = "assets/bubble-exclaim.png";     // !!! — once the cat is back home
+    var img = new Image(); img.src = BUBBLE_X;       // preload the swap frame
     var say = document.getElementById("model-say");
+    var tool = document.getElementById("model-tool");
+    var TOOLS = ["assets/tool1.png", "assets/tool2.png", "assets/tool3.png"];
+    TOOLS.forEach(function (s) { var i = new Image(); i.src = s; });   // preload
 
-    var PX = 64;            // one 16px sprite cell scaled x4
-    var FEET = 16;          // transparent px at the bottom of a scaled cell
-    var GROUND = 20;        // feet rest this many px above the scene floor
+    var PX = 80;            // one 16px sprite cell scaled x5
+    var FEET = 20;          // transparent px at the bottom of a scaled cell
+    var GROUND = 40;        // feet rest on the soil surface (soil strip is 40px)
 
     var ACTIONS = {
       sleepidle: { row: 12, frames: 1, fps: 1,  loop: false },
@@ -144,31 +150,45 @@
     }
 
     function geom() {
-      var boxH = model.offsetHeight || 76;
-      var boxW = model.offsetWidth || 104;
+      var boxH = model.offsetHeight || 80;   // hill height (2 tiers)
+      var boxW = model.offsetWidth || 160;
+      var layerH = boxH / 2;                  // one tier
       var onLeft = model.offsetLeft + boxW / 2 - PX / 2;
       return {
         home: 70,
-        ground: GROUND - FEET,          // feet on the floor
-        onLeft: onLeft,                 // centred on the box
-        approach: onLeft - 62,          // just short of the box
-        onBox: GROUND + boxH - FEET     // feet on top of the box
+        ground: GROUND - FEET,               // feet on the soil
+        approach: onLeft - 62,               // just short of the hill
+        t1Left: onLeft - boxW / 4,           // lower tier, on the left step
+        t1Bottom: GROUND + layerH - FEET,    // feet on the lower tier
+        onLeft: onLeft,                      // centred on the top tier
+        onBox: GROUND + boxH - FEET          // feet on the top of the hill
       };
     }
 
-    function sayShow() {
-      var boxH = model.offsetHeight || 64;
-      say.style.left = (model.offsetLeft + model.offsetWidth + 14) + "px";
-      say.style.bottom = (GROUND + boxH + 16) + "px";
-      say.classList.add("show");
+    // Position a pop element just to the right of the cat on the hilltop, kept inside the scene.
+    function place(el) {
+      var g = geom();
+      el.style.bottom = (g.onBox + FEET + 22) + "px";
+      var w = el.offsetWidth || 44;
+      var left = g.onLeft + PX + 12;
+      var maxLeft = scene.clientWidth - w - 6;
+      if (left > maxLeft) { left = maxLeft; }
+      el.style.left = left + "px";
     }
-    function sayHide() { say.classList.remove("show"); }
+    function popHideAll() { say.classList.remove("show"); tool.classList.remove("show"); }
+    async function textBeat() {
+      place(say); say.classList.add("show"); await wait(820);
+      say.classList.remove("show"); await wait(280);
+    }
+    async function toolBeat(src) {
+      tool.src = src; place(tool); tool.classList.add("show"); await wait(820);
+      tool.classList.remove("show"); await wait(280);
+    }
 
     function reset() {
-      model.classList.remove("show");
-      tools.classList.remove("show");
-      request.classList.remove("in", "open");
-      sayHide();
+      request.classList.remove("in", "leaving");
+      bubble.src = BUBBLE_Q;
+      popHideAll();
       var g = geom();
       face(1); setPos(g.home, g.ground); play("sleepidle");
     }
@@ -183,33 +203,34 @@
         reset(); await wait(600);
         var g = geom();
 
-        request.classList.add("in"); await wait(850);         // letter arrives, closed
-        request.classList.add("open"); await wait(700);        // it opens, and stays open
+        request.classList.add("in"); await wait(1200);        // the ??? bubble fades in and bounces
         play("stretch"); await wait(760);                      // olivia wakes
 
+        // climb the hill, one hop per tier
         face(1); play("run"); await moveTo(g.approach, g.ground, 1200);
-        model.classList.add("show"); play("jumpup"); await moveTo(g.onLeft, g.onBox, 480, UP);
-        play("idle"); await wait(350);                         // lands on the ? block
-        sayShow(); await wait(1200); sayHide(); await wait(300); // "/completions" pops out, then fades
+        play("jumpup"); await moveTo(g.t1Left, g.t1Bottom, 380, UP);  // hop onto the lower tier
+        play("jumpup"); await moveTo(g.onLeft, g.onBox, 380, UP);     // hop onto the top tier
+        play("idle"); await wait(350);
 
-        play("jumpdown"); await moveTo(g.approach, g.ground, 460, DOWN);
-        model.classList.remove("show");
-        face(-1); play("run"); tools.classList.add("show"); await moveTo(g.home, g.ground, 1200);
-        play("sit"); await wait(900);                          // tool runs while she's back
+        // on top: alternate /completions with the three tools — text, image, ... , text
+        await textBeat();
+        await toolBeat(TOOLS[0]);
+        await textBeat();
+        await toolBeat(TOOLS[1]);
+        await textBeat();
+        await toolBeat(TOOLS[2]);
+        await textBeat();
 
-        tools.classList.remove("show"); model.classList.add("show");
-        face(1); play("run"); await moveTo(g.approach, g.ground, 1200);
-        play("jumpup"); await moveTo(g.onLeft, g.onBox, 480, UP);
-        play("idle"); await wait(350);                         // back on the ? block
-        sayShow(); await wait(1200); sayHide(); await wait(300); // "/completions" again
-
-        play("jumpdown"); await moveTo(g.approach, g.ground, 460, DOWN);
-        model.classList.remove("show");
-        face(-1); play("run"); await moveTo(g.home, g.ground, 1200);  // run home, letter still open
-        play("sit");
-        request.classList.remove("open"); await wait(500);            // she's back — close it
-        request.classList.remove("in"); await wait(900);              // then slide it off
-        face(1); play("sleep"); await wait(700); play("sleepidle");   // done — back to sleep
+        // turn home, climb down one hop per tier, and return to the bubble
+        face(-1);
+        play("jumpdown"); await moveTo(g.t1Left, g.t1Bottom, 340, DOWN); // drop to the lower tier
+        play("jumpdown"); await moveTo(g.approach, g.ground, 340, DOWN); // drop to the ground
+        play("run"); await moveTo(g.home, g.ground, 1200);              // run home
+        play("sit"); await wait(500);                                  // pause at home
+        bubble.src = BUBBLE_X; await wait(300);                        // swap ??? → !!!
+        request.classList.remove("in");
+        request.classList.add("leaving"); await wait(900);            // slide the bubble off to the left
+        face(1); play("sleep"); await wait(700); play("sleepidle");    // done — back to sleep
         await wait(1500);
       }
       running = false;
@@ -218,7 +239,7 @@
     var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     reset();
     if (reduce) {
-      model.classList.add("show"); request.classList.add("in", "open"); sayShow();
+      request.classList.add("in"); place(say); say.classList.add("show");
     } else if ("IntersectionObserver" in window) {
       var io = new IntersectionObserver(function (entries) {
         entries.forEach(function (e) {

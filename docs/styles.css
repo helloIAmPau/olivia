@@ -252,67 +252,63 @@ h2, h3 { letter-spacing: -0.01em; }
 .usecases-more a { font-weight: 600; }
 
 /* ---- Cat scene (architecture animation) --------------------------------- */
-.cat-scene { position: relative; height: 172px; max-width: 560px; margin: 8px auto 6px; overflow: hidden; }
+.cat-scene { position: relative; height: 210px; max-width: 560px; margin: 8px auto 6px; overflow: hidden; }
+/* Soil the cat runs on: a strip of grass tiles, grass surface at its top (40px). */
 .cat-ground {
-  position: absolute; left: 0; right: 0; bottom: 20px; height: 2px;
-  background: linear-gradient(90deg, transparent,
-    color-mix(in srgb, var(--accent-2) 45%, transparent) 12%,
-    color-mix(in srgb, var(--accent-2) 45%, transparent) 88%, transparent);
+  position: absolute; left: 0; right: 0; bottom: 0; height: 40px;
+  background: url("assets/grass.png") repeat-x left top / 40px 40px;
+  image-rendering: pixelated;
 }
 .request {
-  position: absolute; bottom: 16px; left: -52px; z-index: 1;
+  position: absolute; bottom: 34px; left: 22px; z-index: 1;
   line-height: 0;
-  transition: left .9s cubic-bezier(.4,0,.2,1);
+  opacity: 0;
+  transition: transform .9s cubic-bezier(.4,0,.2,1), opacity .45s ease;
 }
-.request.in { left: 22px; }
-.request .mail {
+/* The ??? bubble fades in and stays while the cat makes its round trip. */
+.request.in { opacity: 1; }
+/* Once the cat is home, the (now !!!) bubble slides off to the left. */
+.request.leaving { transform: translateX(-90px); opacity: 0; }
+.request .bubble {
   position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 40px; height: auto; max-width: none; display: block;
-  fill: var(--ink);
+  width: 46px; height: 46px; max-width: none; display: block;
+  image-rendering: pixelated;
 }
-.request .mail-open { display: none; }
-.request.open .mail-closed { display: none; }
-.request.open .mail-open { display: block; }
-
-.platform {
-  position: absolute; bottom: 20px; left: 62%; z-index: 1;
-  width: 104px; min-height: 76px; box-sizing: border-box;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  padding: 10px 12px; text-align: center;
-  background: var(--sage-soft); border: 1px solid var(--sage); border-radius: 12px;
-  box-shadow: 0 12px 26px -18px rgba(38,48,47,.55);
-  opacity: 0; transform: translateY(10px);
-  transition: opacity .35s ease, transform .35s ease;
+.request.in .bubble { animation: bubble-bounce 1s ease-in-out infinite; }
+@keyframes bubble-bounce {
+  0%, 100% { transform: translate(-50%, 0); }
+  50%      { transform: translate(-50%, -8px); }
 }
-.platform.show { opacity: 1; transform: translateY(0); }
-.platform-label { font-weight: 700; font-size: .95rem; color: var(--ink); }
-.platform-sub { font-family: var(--font-mono); font-size: .72rem; color: var(--ink-soft); }
-.platform-tools-icons { display: flex; gap: 4px; align-items: center; color: color-mix(in srgb, var(--sage) 78%, var(--ink)); }
-
-/* Model is a Super-Mario "?" block — no label; it fades in like the tools box. */
-.platform-model {
-  position: absolute; bottom: 20px; left: 62%; z-index: 2;
-  width: 64px; height: 64px;
-  opacity: 0; transform: translateY(10px);
-  transition: opacity .35s ease, transform .35s ease;
+@media (prefers-reduced-motion: reduce) {
+  .request.in .bubble { animation: none; }
 }
-.platform-model.show { opacity: 1; transform: translateY(0); }
-.mario-px { display: block; width: 64px; height: 64px; image-rendering: pixelated; }
 
-/* "/completions" pops out to the right of the cat + block, then fades away. */
-.model-say {
-  position: absolute; z-index: 4; left: 0; bottom: 0;
-  font-family: var(--font-mono); font-size: .95rem; font-weight: 600;
-  color: color-mix(in srgb, var(--sage) 65%, var(--ink)); white-space: nowrap;
-  opacity: 0; transform: translateX(-8px); pointer-events: none;
+/* The grass hill the cat hops onto — a terraced mound of tiles, always present. */
+.hill {
+  position: absolute; bottom: 40px; left: 50%; z-index: 2;
+  display: flex; flex-direction: column; align-items: center;
+}
+.hill-row { display: flex; }
+.hill .tile { width: 40px; height: 40px; display: block; image-rendering: pixelated; }
+
+/* On the hilltop: /completions and the tool icons take turns, each fading in
+   while sliding up, and fading out while sliding down. */
+.model-pop {
+  position: absolute; z-index: 4; left: 0; bottom: 0; pointer-events: none;
+  opacity: 0; transform: translateY(12px);
   transition: opacity .3s ease, transform .3s ease;
 }
-.model-say.show { opacity: 1; transform: translateX(0); }
+.model-pop.show { opacity: 1; transform: translateY(0); }
+.model-say {
+  font-family: var(--font-mono); font-size: .95rem; font-weight: 600;
+  color: color-mix(in srgb, var(--sage) 65%, var(--ink)); white-space: nowrap;
+}
+.model-tool { width: 34px; height: auto; image-rendering: pixelated; display: block; }
 
 .cat {
-  position: absolute; left: 70px; bottom: 4px; z-index: 3;
-  width: 64px; height: 64px;
-  background: url("assets/cat_spotted_grey.png") no-repeat 0 0 / 576px 832px;
+  position: absolute; left: 70px; bottom: 20px; z-index: 3;
+  width: 80px; height: 80px;
+  background: url("assets/cat_spotted_grey.png") no-repeat 0 0 / 720px 1040px;
   image-rendering: pixelated;
   transition-property: left, bottom; transition-duration: 0ms; transition-timing-function: linear;
   will-change: left, bottom;
@@ -320,7 +316,6 @@ h2, h3 { letter-spacing: -0.01em; }
 
 @media (max-width: 620px) {
   .cat-scene { height: 210px; }
-  .platform { left: 56%; width: 92px; }
 }
 
 /* ---- Security layers & permissions ------------------------------------- */
