@@ -23,7 +23,7 @@ pub struct CronConfig {
 }
 
 pub async fn init_cron(name: String, config: CronConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
-  info!("Initializng {} service as cron service {}", &name, &config.schedule);
+  info!("Initializing {} service as cron service {}", &name, &config.schedule);
 
   let scheduler = match JobScheduler::new().await {
     Ok(scheduler) => scheduler,
@@ -47,12 +47,14 @@ pub async fn init_cron(name: String, config: CronConfig, agent: Arc<Agent>) -> R
     return Box::pin(async move {
       info!("Cron job {} activated ({})", name, schedule);
 
-      match lock.try_lock() {
+      let _guard = match lock.try_lock() {
+        Ok(guard) => guard,
         Err(_) => {
           warn!("Cron job {} still running... Skipping", name);
-        },
-        _ => {}
-      }
+
+          return;
+        }
+      };
 
       let system_prompt = format!(r#"
 A cron job called {} with the following schedule {} has activated.

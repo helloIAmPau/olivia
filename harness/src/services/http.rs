@@ -100,7 +100,7 @@ async fn http_handler(State(state): State<Arc<ServiceState<HttpEndpointConfig>>>
   info!("Activating {} endpoint via {} HTTP request on {}", state.name, state.config.method, state.config.path);
 
   let mut system_prompt = format!(r#"
-The user activated the HTTP endpopint named {}.
+The user activated the HTTP endpoint named {}.
 The endpoint is defined to respond to {} requests on {}.
   "#, state.name, state.config.method, state.config.path);
 
@@ -180,7 +180,7 @@ The request contains a payload as well:
 }
 
 pub async fn init_http(name: String, config: HttpConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
-  info!("Initializng {} service as http service @ http://{}:{}", name, config.address, config.port);
+  info!("Initializing {} service as http service @ http://{}:{}", name, config.address, config.port);
   let mut app = Router::new();
   for (endpoint_name, endpoint_config) in config.endpoints {
     info!("Registered new endpoint {} as [{}] {}", &endpoint_name, &endpoint_config.method, &endpoint_config.path);
