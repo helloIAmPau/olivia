@@ -78,55 +78,155 @@
       <div class="wrap">
         <h2 class="section-title">A <span class="accent">general-purpose</span> harness you can trust <em>more</em></h2>
         <p class="section-lede">
-          OlivIA is built to be the reusable substrate under <em>any</em> agentic
-          workload. You describe an agent and the services that invoke it in one
-          TOML file; the harness exposes the matching endpoints and routes every
-          request through the same sandboxed loop. Swap the prompt, the tools, and
-          the data stores, and the same runtime becomes a support bot, an ETL
-          scheduler, a research assistant, or an internal automation — with the
-          identical safety guarantees.
+          OlivIA is a harness for running LLM agents, configured entirely through a
+          single <strong>TOML file</strong> and built with <strong>security as the
+          first principle</strong>. You declare the agent, the tools it may call,
+          the data stores it may reach, and the services that trigger it — and the
+          harness wires them into one sandboxed loop. Nothing about a deployment is
+          hard-coded: the same runtime adapts to a new job just by rewriting its
+          config, and every job inherits the identical safety guarantees.
         </p>
-        <p class="section-lede">
-          That trust is structural, not hoped-for. OlivIA's architecture narrows
-          what the model can do — and where unexpected behaviour can go — in three
-          ways: it <strong>enforces the communication layer with strongly typed
-          messages</strong>, so the model can only emit a validated envelope rather
-          than free-form actions; it <strong>denies the model full control</strong>,
-          keeping it a router that delegates instead of an operator that executes;
-          and it <strong>sandboxes every tool inside a WebAssembly sandbox</strong>,
-          so tool code runs with only the capabilities it was explicitly granted.
-        </p>
-
         <div class="pillars">
           <article class="pillar">
             <div class="pillar-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h16M4 17h10"/></svg>
             </div>
-            <h3>Two ideas, enforced</h3>
-            <p>The model is a <strong>router, not a solver</strong>, and tools are <strong>untrusted code, so they run sandboxed</strong>. Everything else follows from these.</p>
+            <h3>Strongly typed messages</h3>
+            <p>The communication layer is <strong>enforced with strongly typed messages</strong>, so the model can only emit a validated envelope rather than free-form actions.</p>
           </article>
           <article class="pillar">
             <div class="pillar-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 3l8 4v5c0 4.4-3.1 7.6-8 9-4.9-1.4-8-4.6-8-9V7z"/></svg>
             </div>
-            <h3>Bounded blast radius</h3>
-            <p>The worst a jailbroken model can do is "call tool&nbsp;X"; the worst a buggy tool can do is limited to the handful of capabilities it declared.</p>
-          </article>
-          <article class="pillar">
-            <div class="pillar-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v10H4zM8 19h8M12 15v4"/></svg>
-            </div>
-            <h3>Language-agnostic tools</h3>
-            <p>A tool is any <code>wasm32-wasip2</code> component implementing one WIT contract — write it in Rust, JS, Python, Go, or C.</p>
+            <h3>The model never holds control</h3>
+            <p>OlivIA <strong>denies the model full control</strong>, keeping it a router that delegates instead of an operator that executes.</p>
           </article>
           <article class="pillar">
             <div class="pillar-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="24" height="24"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 3v18M5 8l7-5 7 5M5 8v8l7 5 7-5V8"/></svg>
             </div>
-            <h3>One config, many surfaces</h3>
-            <p>HTTP endpoints, a Telegram bot, and cron triggers all invoke the same agent — declared in a single file.</p>
+            <h3>Every tool is sandboxed</h3>
+            <p>Each tool runs <strong>inside a WebAssembly sandbox</strong>, so tool code executes with only the capabilities it was explicitly granted.</p>
           </article>
         </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Use cases ───────────────────────── -->
+    <section class="section section-alt" id="use-cases">
+      <div class="wrap">
+        <p class="kicker">One harness, many jobs</p>
+        <h2 class="section-title">Rewrite the TOML, and the same runtime becomes something else.</h2>
+        <p class="section-lede">
+          A deployment is nothing but its config. Point OlivIA at a different file
+          and the identical sandboxed runtime turns into a support bot, a
+          retrieval-augmented assistant, an ETL scheduler, or a home-automation
+          brain. One cat, four boxes — the same OlivIA curled up in each.
+        </p>
+
+        <div class="usecases">
+          <div class="tabs" role="tablist" aria-label="Example configurations">
+            <button class="tab is-active" role="tab" aria-selected="true" aria-controls="uc-support" id="tab-support">Support bot</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="uc-rag" id="tab-rag" tabindex="-1">RAG assistant</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="uc-etl" id="tab-etl" tabindex="-1">ETL scheduler</button>
+            <button class="tab" role="tab" aria-selected="false" aria-controls="uc-home" id="tab-home" tabindex="-1">Home automation</button>
+          </div>
+
+          <div class="card code-card tab-panel is-active" role="tabpanel" id="uc-support" aria-labelledby="tab-support">
+            <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">support-bot.toml</span></div>
+<pre><code><span class="c"># A Telegram bot that answers over your ticket history.</span>
+<span class="k">[agent]</span>
+model  = <span class="s">"anthropic/claude-haiku-4-5"</span>
+prompt = <span class="s">"You are a friendly customer-support agent."</span>
+
+<span class="k">[agent.stores.tickets]</span>
+type = <span class="s">"postgres"</span>
+connection_string = <span class="s">"postgresql://user:pass@postgres:5432/support"</span>
+prompt = <span class="s">"Ticket history and customer records."</span>
+
+<span class="k">[services.bot]</span>
+type   = <span class="s">"telegram"</span>
+token  = <span class="s">"123456:ABC-DEF..."</span>
+prompt = <span class="s">"Answer questions and open tickets on request."</span></code></pre>
+          </div>
+
+          <div class="card code-card tab-panel" role="tabpanel" id="uc-rag" aria-labelledby="tab-rag" hidden>
+            <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">rag-assistant.toml</span></div>
+<pre><code><span class="c"># An HTTP endpoint that answers from a document corpus.</span>
+<span class="k">[agent]</span>
+model  = <span class="s">"anthropic/claude-sonnet-5"</span>
+prompt = <span class="s">"Answer strictly from retrieved documents. Cite sources."</span>
+
+<span class="k">[agent.stores.corpus]</span>
+type       = <span class="s">"s3"</span>
+bucket     = <span class="s">"kb-docs"</span>
+endpoint   = <span class="s">"http://rustfs:9000"</span>
+access_key = <span class="s">"…"</span>
+secret_key = <span class="s">"…"</span>
+prompt = <span class="s">"Knowledge-base documents to retrieve and cite."</span>
+
+<span class="k">[services.api]</span>
+type = <span class="s">"http"</span>
+
+<span class="k">[services.api.endpoints.ask]</span>
+method = <span class="s">"post"</span>
+path   = <span class="s">"/ask"</span>
+prompt = <span class="s">"Retrieve relevant docs, then answer the question."</span></code></pre>
+          </div>
+
+          <div class="card code-card tab-panel" role="tabpanel" id="uc-etl" aria-labelledby="tab-etl" hidden>
+            <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">etl-scheduler.toml</span></div>
+<pre><code><span class="c"># A nightly job that loads raw files into the warehouse.</span>
+<span class="k">[agent]</span>
+model  = <span class="s">"anthropic/claude-haiku-4-5"</span>
+prompt = <span class="s">"Run the nightly pipeline. Delegate every step to tools."</span>
+
+<span class="k">[agent.stores.lake]</span>
+type       = <span class="s">"s3"</span>
+bucket     = <span class="s">"raw-events"</span>
+endpoint   = <span class="s">"http://rustfs:9000"</span>
+access_key = <span class="s">"…"</span>
+secret_key = <span class="s">"…"</span>
+prompt = <span class="s">"Raw event files to load."</span>
+
+<span class="k">[agent.stores.warehouse]</span>
+type = <span class="s">"clickhouse"</span>
+host = <span class="s">"http://clickhouse:8123"</span>
+prompt = <span class="s">"Analytics warehouse for aggregates."</span>
+
+<span class="k">[services.nightly]</span>
+type     = <span class="s">"cron"</span>
+schedule = <span class="s">"0 0 3 * * *"</span>
+prompt   = <span class="s">"Load yesterday's files from S3 into ClickHouse."</span></code></pre>
+          </div>
+
+          <div class="card code-card tab-panel" role="tabpanel" id="uc-home" aria-labelledby="tab-home" hidden>
+            <div class="code-head"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="code-name">home-automation.toml</span></div>
+<pre><code><span class="c"># A webhook plus a schedule that drive local device APIs.</span>
+<span class="k">[agent]</span>
+model  = <span class="s">"anthropic/claude-haiku-4-5"</span>
+prompt = <span class="s">"Control home devices via their local HTTP APIs."</span>
+
+<span class="k">[services.webhook]</span>
+type = <span class="s">"http"</span>
+
+<span class="k">[services.webhook.endpoints.trigger]</span>
+method = <span class="s">"post"</span>
+path   = <span class="s">"/trigger"</span>
+prompt = <span class="s">"Interpret the event and call the right device endpoint."</span>
+
+<span class="k">[services.evening]</span>
+type     = <span class="s">"cron"</span>
+schedule = <span class="s">"0 0 19 * * *"</span>
+prompt   = <span class="s">"Dim the lights and lower the thermostat."</span></code></pre>
+          </div>
+        </div>
+
+        <p class="usecases-more">
+          These are just four hats. See the
+          <a href="https://github.com/helloIAmPau/olivia/tree/master/examples" target="_blank" rel="noopener">examples/ folder on GitHub ↗</a>
+          for the full list of ready-to-run configurations.
+        </p>
       </div>
     </section>
 
@@ -136,48 +236,156 @@
         <p class="kicker">Architecture</p>
         <h2 class="section-title">A request enters, the agent routes, a tool runs sandboxed.</h2>
         <p class="section-lede">
-          A trigger arrives through a <strong>service</strong>, is handled by the
-          <strong>agent</strong>, and the agent runs an agentic loop: ask the model
-          what to do, run the chosen tool in a fresh sandbox, feed the result back,
-          repeat — until the model answers <code>done</code> or <code>error</code>.
+          The agent never does the work itself. Watch OlivIA field a request: she
+          wakes, hops onto the model to decide the next move, trots back to run a
+          tool, checks in with the model again, then curls up once the job is done.
         </p>
 
-        <!-- Flow diagram -->
-        <div class="diagram" role="img" aria-label="Data flow: a service receives a trigger and calls the agent; the agent consults the model through the LiteLLM proxy and, on a tool decision, runs a tool in a WASM and WASI sandbox that reaches external services and the shared sandbox directory.">
-          <div class="diagram-col">
-            <div class="node node-in">
-              <span class="node-title">Services</span>
-              <span class="node-sub">HTTP · Telegram · cron</span>
-            </div>
+        <div class="cat-scene" aria-hidden="true">
+          <div class="cat-ground"></div>
+          <div class="request" title="incoming request">
+            <svg class="mail mail-closed" viewBox="0 0 22 17" width="40" shape-rendering="crispEdges" aria-hidden="true">
+              <rect x="1" y="0" width="20" height="1"/><rect x="0" y="1" width="22" height="1"/>
+              <rect x="0" y="2" width="3" height="1"/><rect x="19" y="2" width="3" height="1"/>
+              <rect x="0" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="21" y="3" width="1" height="1"/>
+              <rect x="0" y="4" width="1" height="1"/><rect x="4" y="4" width="1" height="1"/><rect x="17" y="4" width="1" height="1"/><rect x="21" y="4" width="1" height="1"/>
+              <rect x="0" y="5" width="1" height="1"/><rect x="4" y="5" width="2" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="21" y="5" width="1" height="1"/>
+              <rect x="0" y="6" width="1" height="1"/><rect x="5" y="6" width="2" height="1"/><rect x="15" y="6" width="2" height="1"/><rect x="21" y="6" width="1" height="1"/>
+              <rect x="0" y="7" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="14" y="7" width="1" height="1"/><rect x="21" y="7" width="1" height="1"/>
+              <rect x="0" y="8" width="1" height="1"/><rect x="6" y="8" width="3" height="1"/><rect x="13" y="8" width="3" height="1"/><rect x="21" y="8" width="1" height="1"/>
+              <rect x="0" y="9" width="1" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="8" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="15" y="9" width="2" height="1"/><rect x="21" y="9" width="1" height="1"/>
+              <rect x="0" y="10" width="1" height="1"/><rect x="3" y="10" width="3" height="1"/><rect x="10" y="10" width="2" height="1"/><rect x="16" y="10" width="3" height="1"/><rect x="21" y="10" width="1" height="1"/>
+              <rect x="0" y="11" width="3" height="1"/><rect x="19" y="11" width="3" height="1"/>
+              <rect x="0" y="12" width="3" height="1"/><rect x="19" y="12" width="3" height="1"/>
+              <rect x="0" y="13" width="1" height="1"/><rect x="21" y="13" width="1" height="1"/>
+              <rect x="0" y="14" width="1" height="1"/><rect x="21" y="14" width="1" height="1"/>
+              <rect x="0" y="15" width="1" height="1"/><rect x="21" y="15" width="1" height="1"/>
+              <rect x="1" y="16" width="20" height="1"/>
+            </svg>
+            <svg class="mail mail-open" viewBox="0 0 22 19" width="40" shape-rendering="crispEdges" aria-hidden="true">
+              <rect x="4" y="0" width="14" height="1"/>
+              <rect x="3" y="1" width="2" height="1"/><rect x="17" y="1" width="2" height="1"/>
+              <rect x="2" y="2" width="3" height="1"/><rect x="18" y="2" width="2" height="1"/>
+              <rect x="2" y="3" width="3" height="1"/><rect x="18" y="3" width="2" height="1"/>
+              <rect x="2" y="4" width="2" height="1"/><rect x="18" y="4" width="2" height="1"/>
+              <rect x="0" y="5" width="4" height="1"/><rect x="18" y="5" width="4" height="1"/>
+              <rect x="0" y="6" width="4" height="1"/><rect x="18" y="6" width="4" height="1"/>
+              <rect x="0" y="7" width="4" height="1"/><rect x="18" y="7" width="4" height="1"/>
+              <rect x="0" y="8" width="1" height="1"/><rect x="3" y="8" width="2" height="1"/><rect x="17" y="8" width="2" height="1"/><rect x="21" y="8" width="1" height="1"/>
+              <rect x="0" y="9" width="1" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="15" y="9" width="2" height="1"/><rect x="21" y="9" width="1" height="1"/>
+              <rect x="0" y="10" width="1" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="14" y="10" width="2" height="1"/><rect x="21" y="10" width="1" height="1"/>
+              <rect x="0" y="11" width="1" height="1"/><rect x="8" y="11" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/><rect x="21" y="11" width="1" height="1"/>
+              <rect x="0" y="12" width="1" height="1"/><rect x="9" y="12" width="4" height="1"/><rect x="21" y="12" width="1" height="1"/>
+              <rect x="0" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="15" y="13" width="1" height="1"/><rect x="21" y="13" width="1" height="1"/>
+              <rect x="0" y="14" width="1" height="1"/><rect x="5" y="14" width="1" height="1"/><rect x="16" y="14" width="1" height="1"/><rect x="21" y="14" width="1" height="1"/>
+              <rect x="0" y="15" width="1" height="1"/><rect x="4" y="15" width="1" height="1"/><rect x="17" y="15" width="1" height="1"/><rect x="21" y="15" width="1" height="1"/>
+              <rect x="0" y="16" width="1" height="1"/><rect x="3" y="16" width="2" height="1"/><rect x="18" y="16" width="1" height="1"/><rect x="21" y="16" width="1" height="1"/>
+              <rect x="0" y="17" width="4" height="1"/><rect x="18" y="17" width="2" height="1"/><rect x="21" y="17" width="1" height="1"/>
+              <rect x="0" y="18" width="22" height="1"/>
+            </svg>
           </div>
-          <div class="arrow" aria-hidden="true"><span>trigger</span></div>
-          <div class="diagram-col">
-            <div class="node node-agent">
-              <span class="node-title">Agent</span>
-              <span class="node-sub">router / loop</span>
-            </div>
-            <div class="node-link" aria-hidden="true">
-              <div class="arrow arrow-up"><span>ask</span></div>
-              <div class="node node-llm">
-                <span class="node-title">LiteLLM</span>
-                <span class="node-sub">Ollama · Anthropic · OpenAI</span>
-              </div>
-            </div>
+
+          <div class="platform-model" id="platform-model">
+            <svg class="mario-px" viewBox="0 0 16 16" width="64" height="64" shape-rendering="crispEdges" aria-hidden="true">
+              <rect x="0" y="0" width="16" height="1" fill="#5c3a12"/>
+              <rect x="0" y="1" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="1" width="14" height="1" fill="#8a5518"/>
+              <rect x="15" y="1" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="2" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="2" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="2" width="1" height="1" fill="#3f2609"/>
+              <rect x="3" y="2" width="10" height="1" fill="#f4a825"/>
+              <rect x="13" y="2" width="1" height="1" fill="#3f2609"/>
+              <rect x="14" y="2" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="2" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="3" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="3" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="3" width="4" height="1" fill="#f4a825"/>
+              <rect x="6" y="3" width="4" height="1" fill="#ffffff"/>
+              <rect x="10" y="3" width="4" height="1" fill="#f4a825"/>
+              <rect x="14" y="3" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="3" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="4" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="4" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="4" width="3" height="1" fill="#f4a825"/>
+              <rect x="5" y="4" width="1" height="1" fill="#ffffff"/>
+              <rect x="6" y="4" width="4" height="1" fill="#f4a825"/>
+              <rect x="10" y="4" width="1" height="1" fill="#ffffff"/>
+              <rect x="11" y="4" width="3" height="1" fill="#f4a825"/>
+              <rect x="14" y="4" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="4" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="5" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="5" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="5" width="8" height="1" fill="#f4a825"/>
+              <rect x="10" y="5" width="1" height="1" fill="#ffffff"/>
+              <rect x="11" y="5" width="3" height="1" fill="#f4a825"/>
+              <rect x="14" y="5" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="5" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="6" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="6" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="6" width="7" height="1" fill="#f4a825"/>
+              <rect x="9" y="6" width="1" height="1" fill="#ffffff"/>
+              <rect x="10" y="6" width="4" height="1" fill="#f4a825"/>
+              <rect x="14" y="6" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="6" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="7" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="7" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="7" width="6" height="1" fill="#f4a825"/>
+              <rect x="8" y="7" width="1" height="1" fill="#ffffff"/>
+              <rect x="9" y="7" width="5" height="1" fill="#f4a825"/>
+              <rect x="14" y="7" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="7" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="8" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="8" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="8" width="5" height="1" fill="#f4a825"/>
+              <rect x="7" y="8" width="1" height="1" fill="#ffffff"/>
+              <rect x="8" y="8" width="6" height="1" fill="#f4a825"/>
+              <rect x="14" y="8" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="8" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="9" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="9" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="9" width="5" height="1" fill="#f4a825"/>
+              <rect x="7" y="9" width="1" height="1" fill="#ffffff"/>
+              <rect x="8" y="9" width="6" height="1" fill="#f4a825"/>
+              <rect x="14" y="9" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="9" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="10" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="10" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="10" width="12" height="1" fill="#f4a825"/>
+              <rect x="14" y="10" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="10" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="11" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="11" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="11" width="5" height="1" fill="#f4a825"/>
+              <rect x="7" y="11" width="1" height="1" fill="#ffffff"/>
+              <rect x="8" y="11" width="6" height="1" fill="#f4a825"/>
+              <rect x="14" y="11" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="11" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="12" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="12" width="1" height="1" fill="#8a5518"/>
+              <rect x="2" y="12" width="1" height="1" fill="#3f2609"/>
+              <rect x="3" y="12" width="10" height="1" fill="#f4a825"/>
+              <rect x="13" y="12" width="1" height="1" fill="#3f2609"/>
+              <rect x="14" y="12" width="1" height="1" fill="#8a5518"/>
+              <rect x="15" y="12" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="13" width="1" height="1" fill="#5c3a12"/>
+              <rect x="1" y="13" width="14" height="1" fill="#8a5518"/>
+              <rect x="15" y="13" width="1" height="1" fill="#5c3a12"/>
+              <rect x="0" y="14" width="16" height="1" fill="#5c3a12"/>
+              <rect x="0" y="15" width="16" height="1" fill="#5c3a12"/>
+            </svg>
           </div>
-          <div class="arrow" aria-hidden="true"><span>tool</span></div>
-          <div class="diagram-col">
-            <div class="node node-sandbox">
-              <span class="node-title">WASM + WASI sandbox</span>
-              <span class="node-sub">tool registry → run</span>
-            </div>
+          <div class="platform platform-tools" id="platform-tools">
+            <span class="platform-tools-icons" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M14 6l4 4M4 20l8.5-8.5M10 6a4 4 0 0 1 5.5-3.7L13 4.8l1.2 3 3-1.2 2.5-2.5A4 4 0 0 1 16 10l-1 1"/></svg>
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M3 21l6-6M8 14l7-7 2 2-7 7zM15 7l3-3 2 2-3 3z"/></svg>
+              <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 3a5 5 0 0 0 6.5 6.3l4.5 4.5a2 2 0 0 1-2.8 2.8L12.7 12A5 5 0 0 1 6 5.5L8.5 8 10 6.5 12 4.5z"/></svg>
+            </span>
+            <span class="platform-label">Tools</span>
           </div>
-          <div class="arrow" aria-hidden="true"><span>grants</span></div>
-          <div class="diagram-col">
-            <div class="node node-out">
-              <span class="node-title">Resources</span>
-              <span class="node-sub">SearXNG · Browserless · Postgres · ClickHouse · S3 · /sandbox</span>
-            </div>
-          </div>
+
+          <div class="cat" id="cat"></div>
+          <div class="model-say" id="model-say">/completions</div>
         </div>
 
         <!-- Agent loop -->
