@@ -25,7 +25,7 @@ impl Display for ConfigError {
   fn fmt(&self, formatter: &mut Formatter) -> FormatterResult {
     return match self {
       ConfigError::Io(error) => write!(formatter, "IO Error - {}", error),
-      ConfigError::Parsing(error) => write!(formatter, "Yaml Parsing Error - {}", error)
+      ConfigError::Parsing(error) => write!(formatter, "Toml Parsing Error - {}", error)
     };
   }
 }

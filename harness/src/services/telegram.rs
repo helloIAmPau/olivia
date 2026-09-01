@@ -166,7 +166,7 @@ async fn send_payload(bot: Bot, message: Message, data: AgentResult) -> Response
 
 
 pub async fn init_telegram(name: String, config: TelegramConfig, agent: Arc<Agent>) -> Result<(), ServiceError> {
-  info!("Initializng {} service as bot telegram", name);
+  info!("Initializing {} service as bot telegram", name);
 
   let chatid_sessions = Arc::new(Mutex::new(HashMap::<ChatId, Uuid>::new()));
 

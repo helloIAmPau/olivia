@@ -49,11 +49,11 @@ pub enum AgentError {
   Completions(ChatRequest, ChatResponse),
   LLMRequest(u16, String),
   MaxIterations,
+  TooManyInvalidResponses,
   Agent(String),
   Io(IoError),
   InvalidToolInput(String, String, &'static str),
   Tool(String),
-  Lock(String),
   SessionMutex(String),
   Session(Uuid),
   Wasm(WasmError)
@@ -72,9 +72,9 @@ impl Display for AgentError {
       AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
       AgentError::LLMRequest(status, body) => write!(formatter, "LLM Request Error - upstream returned HTTP {}: {}", status, body),
       AgentError::MaxIterations => write!(formatter, "Max agentic loop iterations reached. Aborted trigger"),
+      AgentError::TooManyInvalidResponses => write!(formatter, "Too many consecutive unparseable model responses. Aborted trigger"),
       AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message),
       AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
-      AgentError::Lock(error) => write!(formatter, "Lock Error - {}", error),
       AgentError::Wasm(error) => write!(formatter, "Wasm Error - {}", error),
       AgentError::SessionMutex(error) => write!(formatter, "Session Mutex Error - Unable to lock the sessions store: {}", error),
       AgentError::Session(session_id) => write!(formatter, "Session Error - Invalid session id {}", session_id),
@@ -173,7 +173,7 @@ pub struct AgentPayload {
   pub thought: String,
   /// the execution result
   pub state: AgentPayloadState,
-  /// your output if the execution succeded. Required for state = Done, null otherwise
+  /// your output if the execution succeeded. Required for state = Done, null otherwise
   pub result: Option<String>,
   /// your error message, if any, if the execution failed. Required for state = Error, null otherwise
   pub error_message: Option<String>,
@@ -458,7 +458,7 @@ PREVIOUS_STATE:
       }
 
       if bad_iterations >= MAX_BAD_ITERATIONS {
-        return Err(AgentError::MaxIterations);
+        return Err(AgentError::TooManyInvalidResponses);
       }
 
       iterations = iterations + 1;
