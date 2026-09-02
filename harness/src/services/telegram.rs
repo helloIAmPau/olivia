@@ -62,6 +62,12 @@ async fn handle_command(bot: Bot, message: Message, command: Commands, state: Ar
     Commands::Do(prompt) => {
       let request = vec![
         ChatMessage {
+          role: ChatMessageRole::System,
+          content: format!(r#"
+A user sent a message to the Telegram bot named {}.
+          "#, state.name)
+        },
+        ChatMessage {
           role: ChatMessageRole::User,
           content: state.config.prompt.clone()
         },

@@ -49,7 +49,7 @@ pub enum AgentError {
   Completions(ChatRequest, ChatResponse),
   LLMRequest(u16, String),
   MaxIterations,
-  TooManyInvalidResponses,
+  TooManyFailures,
   Agent(String),
   Io(IoError),
   InvalidToolInput(String, String, &'static str),
@@ -72,7 +72,7 @@ impl Display for AgentError {
       AgentError::Completions(request, response) => write!(formatter, "Invalid response from model\nrequest:\n{:#?}\nresponse:\n{:#?}", request, response),
       AgentError::LLMRequest(status, body) => write!(formatter, "LLM Request Error - upstream returned HTTP {}: {}", status, body),
       AgentError::MaxIterations => write!(formatter, "Max agentic loop iterations reached. Aborted trigger"),
-      AgentError::TooManyInvalidResponses => write!(formatter, "Too many consecutive unparseable model responses. Aborted trigger"),
+      AgentError::TooManyFailures => write!(formatter, "Too many consecutive failures (unparseable replies or tool errors). Aborted trigger"),
       AgentError::Agent(message) => write!(formatter, "Agent Error - {}", message),
       AgentError::Tool(error) => write!(formatter, "Tool Error - {}", error),
       AgentError::Wasm(error) => write!(formatter, "Wasm Error - {}", error),
@@ -195,7 +195,7 @@ pub struct AgentResult {
 }
 
 const MAX_ITERATIONS: i32 = 200;
-const MAX_BAD_ITERATIONS: i32 = 3;
+const MAX_FAILURES: i32 = 5;
 
 pub struct Agent {
   client: LLMClient,
@@ -450,15 +450,15 @@ PREVIOUS_STATE:
     };
 
     let mut iterations = 0;
-    let mut bad_iterations = 0;
+    let mut failures = 0;
 
     loop {
       if iterations >= MAX_ITERATIONS {
         return Err(AgentError::MaxIterations);
       }
 
-      if bad_iterations >= MAX_BAD_ITERATIONS {
-        return Err(AgentError::TooManyInvalidResponses);
+      if failures >= MAX_FAILURES {
+        return Err(AgentError::TooManyFailures);
       }
 
       iterations = iterations + 1;
@@ -508,13 +508,11 @@ single raw JSON object.
             payload[last_index] = next_message;
           }
 
-          bad_iterations = bad_iterations + 1;
+          failures = failures + 1;
 
           continue;
         }
       };
-
-      bad_iterations = 0;
 
       match agent_payload.state {
         AgentPayloadState::Done => {
@@ -562,6 +560,8 @@ single raw JSON object.
 
           let tool_output = match self.registry.run(name, params, &session_id).await {
             Ok(tool_output) => {
+              failures = 0;
+
               format!(r#"
 PREVIOUS_STATE:
 {}
@@ -576,6 +576,8 @@ Bind this result to the step in "cur", append its outcome to "done".
               "#, assistant_chat_message.content, tool_output)
             },
             Err(AgentError::InvalidToolInput(_, _, message)) => {
+              failures = failures + 1;
+
               format!(r#"
 PREVIOUS_STATE:
 {}
@@ -595,6 +597,8 @@ Re-emit the same intended step, corrected, as a single raw JSON object.
               "#, assistant_chat_message.content, message)
             },
             Err(error) => {
+              failures = failures + 1;
+
               format!(r#"
 PREVIOUS_STATE:
 {}

@@ -84,7 +84,12 @@ fn run(input: HttpParams) -> ToolOutput {
 
   match input.body {
     Some(body) => {
-      builder = builder.body(body.into_bytes());
+      match input.method {
+        HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch | HttpMethod::Delete => {
+          builder = builder.body(body.into_bytes());
+        },
+        _ => {}
+      };
     },
     None => {}
   };

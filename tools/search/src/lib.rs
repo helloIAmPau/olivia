@@ -30,6 +30,8 @@ struct SearchResponse {
   results: Vec<SearchResult>
 }
 
+const LIMIT: usize = 5;
+
 fn run(input: SearchParams) -> ToolOutput {
   let base = match var("SEARXNG_HOST") {
     Ok(base) => base,
@@ -39,14 +41,13 @@ fn run(input: SearchParams) -> ToolOutput {
   let endpoint = format!("{}/search", base);
   let response = match Client::new().get(endpoint.as_str()).query([
     ("q", input.query),
-    ("format", "json".to_string()),
-    ("limit", "5".to_string())
+    ("format", "json".to_string())
   ]).send() {
     Ok(response) => response,
     Err(error) => {
       return ToolOutput {
         state: ToolOutputState::Error,
-        content: format!("Request to browserless failed: {}", error)
+        content: format!("Request to searxng failed: {}", error)
       };
     }
   };
@@ -72,7 +73,7 @@ fn run(input: SearchParams) -> ToolOutput {
   };
 
   let mut content = String::new();
-  for result in parsed.results.iter().take(5) {
+  for result in parsed.results.iter().take(LIMIT) {
     content.push_str(&format!("{}\n{}\n{}\n\n", result.title, result.url, result.content));
   }
 
@@ -87,6 +88,6 @@ define_tool!(
   SearchParams,
   "Searches the internet for a query and returns the top results as title, url and description. Use it whenever you need fresh or external information you do not already know.",
   vec![Permission::Network],
-  vec![],
+  vec!["SEARXNG_HOST".to_string()],
   run
 );

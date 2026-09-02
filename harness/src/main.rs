@@ -37,7 +37,6 @@ async fn main() {
     }
   };
 
-  let agent = agent;
   match init(config.services, agent).await {
     Err(error) => {
       panic!("{}", error);

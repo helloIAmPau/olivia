@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::future::pending;
 
 use tokio::sync::Mutex;
 
@@ -101,5 +102,5 @@ A cron job called {} with the following schedule {} has activated.
     _ => {}
   };
 
-  return Ok(());
+  return Ok(pending::<()>().await);
 }

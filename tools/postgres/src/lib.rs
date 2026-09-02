@@ -37,10 +37,10 @@ fn run(input: PostgresClientParams) -> ToolOutput {
     }
   };
 
-  println!("[postgres_client] Parsed connection stirng {}", input.connection_string);
+  println!("[postgres_client] Parsed connection string {}", input.connection_string);
 
   let host = match connection.host() {
-    Some(host) => host.to_string().to_string().to_string().to_string(),
+    Some(host) => host.to_string(),
     None => "postgres".to_string()
   };
 
@@ -188,8 +188,8 @@ fn run(input: PostgresClientParams) -> ToolOutput {
 		  	Message::RowDescription(body) => {
 		  	    println!("[postgres_client] Received packet RowDescription");
 
-		  	    let header = match body.fields().map(|field| Ok(field.name().to_string())).collect::<Vec<String>>() {
-              Ok(fields) => fields.join(", "),
+		  	    let header = match body.fields().map(|field| Ok(format!("\"{}\"", field.name().replace("\"", "\"\"")))).collect::<Vec<String>>() {
+              Ok(fields) => fields.join(","),
               Err(error) => {
                 return ToolOutput {
                   state: ToolOutputState::Error,
@@ -206,11 +206,11 @@ fn run(input: PostgresClientParams) -> ToolOutput {
           let data = body.buffer();
           let csv = match body.ranges().map(|range| {
             match range {
-              Some(range) => Ok(String::from_utf8_lossy(&data[range]).into_owned()),
+              Some(range) => Ok(format!("\"{}\"", String::from_utf8_lossy(&data[range]).replace("\"", "\"\""))),
               None => Ok(String::new())
             }
           }).collect::<Vec<String>>() {
-            Ok(rows) => rows.join(", "),
+            Ok(rows) => rows.join(","),
             Err(error) => {
               return ToolOutput {
                 state: ToolOutputState::Error,

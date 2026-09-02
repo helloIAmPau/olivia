@@ -87,6 +87,6 @@ define_tool!(
   WebParams,
   "Drives a headless browser through the browserless /function API. Provide the body of a JavaScript module that default-exports an async function receiving { page, context } (page is a Puppeteer Page) and returning { data, type }. Use it to browse, scrape or screenshot pages whenever you need fresh or external information you do not already have.",
   vec![Permission::Network],
-  vec!["BROWSERLESS_TOKEN".to_string()],
+  vec!["BROWSERLESS_TOKEN".to_string(), "BROWSERLESS_HOST".to_string()],
   run
 );
